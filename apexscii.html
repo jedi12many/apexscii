@@ -49,6 +49,7 @@
 <header>
   <h1>APEXSCII</h1>
   <span>isometric PETSCII-style character set for the Commodore 64 · hi-res 8×8 or multicolor 4×8 · 2:1 slopes</span>
+  <span style="flex:1"></span><a href="art.html" style="color:var(--dim)">Art tool →</a>
 </header>
 <main>
   <section>
@@ -470,6 +471,11 @@ $('xMapAsm').onclick = () => download(`apexscii${tag()}-map.asm`,
 $('xBin').onclick = () => download(`apexscii${tag()}.bin`, APEX.flatten(base));
 $('xPrg').onclick = () => download(`apexscii${tag()}-charset.prg`, APEX.charsetPrg(base));
 $('xAsm').onclick = () => download(`apexscii${tag()}.asm`, APEX.charsetAsm(base, NAMES));
+
+// The art tool writes the same charset key; pick up its changes live.
+window.addEventListener('storage', e => {
+  if (e.key === CS_KEY[map.mode] && e.newValue) { base = loadCharset(map.mode); rebuild(); }
+});
 
 rebuild();
 </script>

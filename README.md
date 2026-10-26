@@ -3,6 +3,7 @@
 An isometric, PETSCII-style character set for the Commodore 64 (8×8 hi-res, 2:1 slopes).
 
 - `apexscii.html` — editor: paint an 8×8 iso map, edit glyphs, export. Serve the folder (`python -m http.server`) and open it.
+- `art.html` — art tool: draw characters and multi-character tiles (see below).
 - `apexscii-core.js` — charset generator, iso rasteriser, compositor, PRG/asm exporters (browser + Node).
 - `build.js` — `node build.js` writes the default files to `out/`.
 
@@ -18,6 +19,22 @@ An isometric, PETSCII-style character set for the Commodore 64 (8×8 hi-res, 2:1
 | `$B6-$FF` | Free — the map compositor puts object/junction glyphs here |
 
 Each shade set holds 51 glyphs: 3 solid faces plus 4 slope boundaries (`/` upper, `/` lower, `\` upper, `\` lower) × 12 ordered face pairs (empty/top/left/right). A 32×16 diamond is 4×2 chars and a full cube is 4×4 chars, so any heightmap made of cubes on the grid lands on exact glyph matches.
+
+## Art tool
+
+`art.html` has two tabs:
+
+- **Tiles**: draw blocks of characters (1×1 up to 8×8 chars), such as 4×2 floor diamonds, 4×4 cubes and 2×3 figures. You draw pixels across the whole tile, and each changed cell is converted back to characters:
+  - if an identical glyph already exists, the cell reuses it
+  - if the cell's glyph is used only by that cell, it's edited directly
+  - otherwise the new glyph goes into a blank slot from `$B6` up, so other tiles that share the glyph don't change
+
+  Turn off *protect shared glyphs* to edit the glyph itself everywhere it's used. *Stamp char*, *Pick* and *Cell colour* work on whole cells, like a PETSCII editor.
+- **Characters**: edit any of the 256 glyphs directly, in place.
+
+Tools: pencil, line (with *iso snap* to horizontal, vertical or clean 2:1 slopes), rectangle, 2:1 diamond (it draws exactly the staircase the built-in floor glyphs use), and flood fill. Also flip, shift, invert, copy/paste and undo/redo (Ctrl+Z / Ctrl+Y). Left button draws, right button erases. In multicolor, the canvas paints 4×8 fat pixels with the four pens. The preview shows the tile 3×3 in an iso lattice, so you can check the seams.
+
+The character set is stored under the same browser key as the map editor's, and each page picks up the other's changes live. Exports: charset `.bin`/`.prg`/`.asm`, tiles `.asm` (width, height, screen codes, colour RAM values), a `.png` tile sheet, and a project `.json` you can reopen later.
 
 ## Multicolor mode
 

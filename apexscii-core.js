@@ -284,60 +284,67 @@
              mode: 'hires', mc1: 12, mc2: 11 };
   }
 
+  // Draw one iso block with its 32x32 box at (sx, sy) through plot(x, y, value, colour, isObj).
+  // Multicolor values are computed per pixel pair, so they come out duplicated across each pair.
+  function drawBlock(plot, sx, sy, mat, mc, withSides) {
+    const set = SETS[mat.set], mset = MC_SETS[mat.set];
+    for (let px = 0; px < 32; px++) {
+      const left = px < 16;
+      const top = left ? 7 - (px >> 1) : (px - 16) >> 1;
+      const bot = left ? 8 + (px >> 1) : 15 - ((px - 16) >> 1);
+      const end = withSides ? bot + 16 : bot;
+      for (let py = top; py < end; py++) {
+        const f = py < bot ? 'T' : (left ? 'L' : 'R');
+        const x = sx + px, y = sy + py;
+        if (mc) plot(x, y, mset[f](x >> 1, y), mat.mcColor, false);
+        else plot(x, y, set[f](x, y), mat.colors[f], false);
+      }
+    }
+  }
+
+  // Draw a 16x24 object with its top-left at (ox, oy); 'o' pixels clear ink, '.' is transparent.
+  function drawObject(plot, ob, ox, oy, mc) {
+    if (mc) ob.rows.forEach((r, y) => {
+      for (let x = 0; x < 16; x += 2) {
+        const a = r[x], b = r[x + 1];
+        const ch = /[^.o]/.test(a) ? a : /[^.o]/.test(b) ? b : (a === 'o' || b === 'o') ? 'o' : '.';
+        if (ch === '.') continue;
+        const [v, c] = ch === 'o' ? [0, -1] : ob.mc[ch];
+        for (const dx of [0, 1]) plot(ox + x + dx, oy + y, v, c === undefined ? -1 : c, ch !== 'o');
+      }
+    });
+    else ob.rows.forEach((r, y) => {
+      for (let x = 0; x < 16; x++) {
+        const ch = r[x];
+        if (ch === '.') continue;
+        if (ch === 'o') plot(ox + x, oy + y, 0, -1, false);
+        else plot(ox + x, oy + y, 1, ob.palette[ch], true);
+      }
+    });
+  }
+
   // Rasterise the map into 320x200 pixel values + per-pixel colour + column owner.
   // Hi-res: ink holds 0/1. Multicolor: ink holds the 2-bit value, duplicated across each pixel pair.
   function renderScene(map) {
     const ink = new Uint8Array(W * H), col = new Uint8Array(W * H), own = new Int16Array(W * H).fill(-1);
     const obj = new Uint8Array(W * H); // 1 where an object's ink landed
     const n = map.size, mc = map.mode === 'mc', mapBottom = (25 - statusRows(map)) * 8;
-    function plot(x, y, v, c, idx, isObj) {
+    let idx = -1;
+    function plot(x, y, v, c, isObj) {
       if (x < 0 || y < 0 || x >= W || y >= mapBottom) return; // status rows stay clear
       const i = y * W + x;
       ink[i] = +v; if (c >= 0) col[i] = c; own[i] = idx; obj[i] = isObj ? 1 : 0;
     }
-    function block(sx, sy, mat, idx, withSides) {
-      const set = SETS[mat.set], mset = MC_SETS[mat.set];
-      for (let px = 0; px < 32; px++) {
-        const left = px < 16;
-        const top = left ? 7 - (px >> 1) : (px - 16) >> 1;
-        const bot = left ? 8 + (px >> 1) : 15 - ((px - 16) >> 1);
-        const end = withSides ? bot + 16 : bot;
-        for (let py = top; py < end; py++) {
-          const f = py < bot ? 'T' : (left ? 'L' : 'R');
-          const x = sx + px, y = sy + py;
-          if (mc) plot(x, y, mset[f](x >> 1, y), mat.mcColor, idx);
-          else plot(x, y, set[f](x, y), mat.colors[f], idx);
-        }
-      }
-    }
     for (let s = 0; s <= 2 * n - 2; s++) {
       for (let gx = Math.max(0, s - n + 1); gx <= Math.min(s, n - 1); gx++) {
-        const gy = s - gx, idx = gy * n + gx, c = map.cells[idx];
+        const gy = s - gx, c = map.cells[gy * n + gx];
+        idx = gy * n + gx;
         if (c.m < 0) continue;
         const mat = MATERIALS[c.m];
         const sx = ORIGIN_X + (gx - gy) * 16, base = BASE_Y + (gx + gy) * 8;
-        if (c.h === 0) block(sx, base + 16, mat, idx, false);
-        else for (let z = 0; z < c.h; z++) block(sx, base - z * 16, mat, idx, true);
-        if (c.o >= 0) {
-          const ob = OBJECTS[c.o], D = base + 16 - 16 * c.h, ox = sx + 8, oy = D - 8;
-          if (mc) ob.rows.forEach((r, y) => {
-            for (let x = 0; x < 16; x += 2) {
-              const a = r[x], b = r[x + 1];
-              const ch = /[^.o]/.test(a) ? a : /[^.o]/.test(b) ? b : (a === 'o' || b === 'o') ? 'o' : '.';
-              if (ch === '.') continue;
-              const [v, c] = ch === 'o' ? [0, -1] : ob.mc[ch];
-              for (const dx of [0, 1]) plot(ox + x + dx, oy + y, v, c === undefined ? -1 : c, idx, ch !== 'o');
-            }
-          });
-          else ob.rows.forEach((r, y) => {
-            for (let x = 0; x < 16; x++) {
-              const ch = r[x];
-              if (ch === '.') continue;
-              if (ch === 'o') plot(ox + x, oy + y, false, -1, idx);
-              else plot(ox + x, oy + y, true, ob.palette[ch], idx, true);
-            }
-          });
-        }
+        if (c.h === 0) drawBlock(plot, sx, base + 16, mat, mc, false);
+        else for (let z = 0; z < c.h; z++) drawBlock(plot, sx, base - z * 16, mat, mc, true);
+        if (c.o >= 0) drawObject(plot, OBJECTS[c.o], sx + 8, base + 16 - 16 * c.h - 8, mc);
       }
     }
     return { ink, col, own, obj };
@@ -358,63 +365,77 @@
     return 32;
   }
 
+  // Pack the 8x8 cell at (x0, y0) of a raster (ink/col/obj arrays, row length `stride`) into glyph
+  // bytes and a colour RAM value. One colour per cell: in hi-res, terrain wins so objects over ground
+  // read as carved silhouettes; in multicolor only "11" pixels use the cell colour, and an object wins.
+  function encodeCell(r, stride, x0, y0, mc) {
+    const g = new Uint8Array(8), counts = new Uint16Array(16), objCounts = new Uint16Array(16);
+    if (mc) {
+      for (let y = 0; y < 8; y++) for (let fx = 0; fx < 4; fx++) {
+        const i = (y0 + y) * stride + x0 + fx * 2, v = r.ink[i];
+        g[y] |= v << (6 - 2 * fx);
+        if (v === 3) (r.obj[i] ? objCounts : counts)[r.col[i] & 7]++;
+      }
+    } else {
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const i = (y0 + y) * stride + x0 + x;
+        if (r.ink[i]) { g[y] |= 0x80 >> x; (r.obj[i] ? objCounts : counts)[r.col[i]]++; }
+      }
+    }
+    let c = mc ? 0 : 1, cm = 0;
+    const src = mc ? (objCounts.some(v => v) ? objCounts : counts) : (counts.some(v => v) ? counts : objCounts);
+    for (let j = 0; j < 16; j++) if (src[j] > cm) { cm = src[j]; c = j; }
+    return { bytes: g, color: mc ? 8 | (c & 7) : c };
+  }
+
+  // Finds a glyph's screen code, reusing an identical glyph or claiming a blank slot at $40+.
+  // Mutates `chars`; code() returns -1 when no blank slot is left.
+  function makeAllocator(chars) {
+    const lookup = new Map(), free = [], allocated = [];
+    for (let i = 0x40; i < 256; i++) {
+      if (isZero(chars[i])) free.push(i);
+      else if (!lookup.has(keyOf(chars[i]))) lookup.set(keyOf(chars[i]), i);
+    }
+    for (let i = 0; i < 0x40; i++) if (!lookup.has(keyOf(chars[i]))) lookup.set(keyOf(chars[i]), i);
+    lookup.set(keyOf(new Uint8Array(8)), 0x20);
+    return {
+      allocated, freeTotal: free.length,
+      code(g) {
+        const k = keyOf(g);
+        let idx = lookup.get(k);
+        if (idx === undefined && free.length) {
+          idx = free.shift(); chars[idx] = Uint8Array.from(g); lookup.set(k, idx); allocated.push(idx);
+        }
+        return idx === undefined ? -1 : idx;
+      },
+    };
+  }
+  function nearestGlyph(chars, g) {
+    let best = 0x20, bd = 99;
+    for (let j = 0; j < 256; j++) {
+      let d = 0;
+      for (let y = 0; y < 8; y++) d += popcount(chars[j][y] ^ g[y]);
+      if (d < bd) { bd = d; best = j; }
+    }
+    return best;
+  }
+
   // Turn the raster into screen codes + colours. Cells that match an existing glyph reuse it;
   // anything else is written into a free (blank) slot at $40+; overflow falls back to the nearest glyph.
   function composite(base, raster, map) {
     const mc = map.mode === 'mc';
     const chars = base.map(g => Uint8Array.from(g));
-    const lookup = new Map(), free = [];
-    const order = [];
-    for (let i = 0x40; i < 256; i++) order.push(i);
-    for (let i = 0; i < 0x40; i++) order.push(i);
-    for (const i of order) {
-      if (i >= 0x40 && isZero(chars[i])) { free.push(i); continue; }
-      const k = keyOf(chars[i]);
-      if (!lookup.has(k)) lookup.set(k, i);
-    }
-    const emptyKey = keyOf(new Uint8Array(8));
-    lookup.set(emptyKey, 0x20);
-    const freeTotal = free.length, allocated = [];
+    const alloc = makeAllocator(chars);
     let overflow = 0;
     const screen = new Uint8Array(1000), color = new Uint8Array(1000);
     for (let cy = 0; cy < 25; cy++) for (let cx = 0; cx < 40; cx++) {
-      // One colour per cell: terrain wins, so objects over ground read as carved silhouettes;
-      // an object only shows its own colour where the cell holds no terrain ink (e.g. against the sky).
-      // Multicolor: only "11" pixels use the cell colour, and there an object's own colour wins.
-      const g = new Uint8Array(8), counts = new Uint16Array(16), objCounts = new Uint16Array(16);
-      if (mc) {
-        for (let y = 0; y < 8; y++) for (let fx = 0; fx < 4; fx++) {
-          const i = (cy * 8 + y) * W + cx * 8 + fx * 2, v = raster.ink[i];
-          g[y] |= v << (6 - 2 * fx);
-          if (v === 3) (raster.obj[i] ? objCounts : counts)[raster.col[i] & 7]++;
-        }
-      } else {
-        for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-          const i = (cy * 8 + y) * W + cx * 8 + x;
-          if (raster.ink[i]) { g[y] |= 0x80 >> x; (raster.obj[i] ? objCounts : counts)[raster.col[i]]++; }
-        }
-      }
-      const k = keyOf(g);
-      let idx = lookup.get(k);
-      if (idx === undefined) {
-        if (free.length) {
-          idx = free.shift(); chars[idx] = g; lookup.set(k, idx); allocated.push(idx);
-        } else {
-          let best = 0x20, bd = 99;
-          for (let j = 0; j < 256; j++) {
-            let d = 0;
-            for (let y = 0; y < 8; y++) d += popcount(chars[j][y] ^ g[y]);
-            if (d < bd) { bd = d; best = j; }
-          }
-          idx = best; overflow++;
-        }
-      }
-      let c = mc ? 0 : 1, cm = 0;
-      const src = mc ? (objCounts.some(v => v) ? objCounts : counts) : (counts.some(v => v) ? counts : objCounts);
-      for (let j = 0; j < 16; j++) if (src[j] > cm) { cm = src[j]; c = j; }
+      const { bytes, color: c } = encodeCell(raster, W, cx * 8, cy * 8, mc);
+      let idx = alloc.code(bytes);
+      if (idx < 0) { idx = nearestGlyph(chars, bytes); overflow++; }
       screen[cy * 40 + cx] = idx;
-      color[cy * 40 + cx] = mc ? 8 | (c & 7) : c;
+      color[cy * 40 + cx] = c;
     }
+    const { allocated, freeTotal } = alloc;
     const rows = statusRows(map), split = map.split !== false;
     statusLines(map).forEach((line, r) => {
       // {text} is reverse video — only meaningful with the ROM font, where $80-$FF are the inverses.
@@ -432,6 +453,52 @@
       });
     });
     return { chars, screen, color, allocated, overflow, freeTotal };
+  }
+
+  // ----------------------------------------------------------------- tiles
+  // A tile is a w x h block of cells, each { c: screen code, k: colour RAM value }.
+  // Starter tiles are drawn with the map renderer's own block/object code, so they match it exactly.
+  function starterTiles(chars, mode) {
+    const mc = mode === 'mc', alloc = makeAllocator(chars);
+    const make = (name, w, h, draw) => {
+      const stride = w * 8, n = stride * h * 8;
+      const r = { ink: new Uint8Array(n), col: new Uint8Array(n), obj: new Uint8Array(n) };
+      draw((x, y, v, c, isObj) => {
+        if (x < 0 || y < 0 || x >= stride || y >= h * 8) return;
+        const i = y * stride + x;
+        r.ink[i] = +v; if (c >= 0) r.col[i] = c; r.obj[i] = isObj ? 1 : 0;
+      });
+      const cells = [];
+      for (let cy = 0; cy < h; cy++) for (let cx = 0; cx < w; cx++) {
+        const { bytes, color } = encodeCell(r, stride, cx * 8, cy * 8, mc);
+        const code = alloc.code(bytes);
+        cells.push({ c: code < 0 ? nearestGlyph(chars, bytes) : code, k: color });
+      }
+      return { name, w, h, cells };
+    };
+    const mat = name => MATERIALS.find(m => m.name === name);
+    return [
+      make('Grass floor', 4, 2, p => drawBlock(p, 0, 0, mat('Grass'), mc, false)),
+      make('Water floor', 4, 2, p => drawBlock(p, 0, 0, mat('Water'), mc, false)),
+      make('Grass cube', 4, 4, p => drawBlock(p, 0, 0, mat('Grass'), mc, true)),
+      make('Stone cube', 4, 4, p => drawBlock(p, 0, 0, mat('Stone'), mc, true)),
+      make('Brick cube', 4, 4, p => drawBlock(p, 0, 0, mat('Brick'), mc, true)),
+      ...OBJECTS.map(ob => make(ob.name, 2, 3, p => drawObject(p, ob, 0, 0, mc))),
+    ];
+  }
+
+  function tilesAsm(tiles) {
+    const out = ['; APEXSCII tiles — per tile: width, height, screen codes (row by row), then colour RAM values'];
+    const used = new Set();
+    tiles.forEach((t, n) => {
+      let label = 'tile_' + (t.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || n);
+      while (used.has(label)) label += '_';
+      used.add(label);
+      out.push(`${label}:`, `    .byte ${t.w},${t.h}`);
+      for (let y = 0; y < t.h; y++) out.push('    .byte ' + t.cells.slice(y * t.w, y * t.w + t.w).map(c => hex(c.c)).join(','));
+      for (let y = 0; y < t.h; y++) out.push('    .byte ' + t.cells.slice(y * t.w, y * t.w + t.w).map(c => hex(c.k & 15)).join(','));
+    });
+    return out.join('\n') + '\n';
   }
 
   // Status bar: one line of the caption per row, 1-3 rows at the bottom of the screen.
@@ -575,6 +642,6 @@
 
   return {
     W, H, MAX_H, PALETTE, COLOR_NAMES, MATERIALS, OBJECTS, REGIONS, SETS, MC_SETS, BOUNDS, PAIRS,
-    isMCSlot, screenRGB, statusRows, buildDefault, defaultMap, renderScene, composite, flatten, charsetPrg, mapPrg, charsetAsm, mapAsm, hex,
+    isMCSlot, screenRGB, statusRows, starterTiles, tilesAsm, buildDefault, defaultMap, renderScene, composite, flatten, charsetPrg, mapPrg, charsetAsm, mapAsm, hex,
   };
 });
