@@ -6,6 +6,7 @@ PETSCII-style character sets for the Commodore 64, one per perspective: isometri
 - `art.html` — art tool: draw characters and multi-character tiles (see below).
 - `apexscii-core.js` — charset generators, renderers, compositor, PRG/asm exporters (browser + Node).
 - `build.js` — `node build.js` writes the default files for every perspective to `out/`.
+- `test/vice-check.js` — runs every demo in VICE and checks it pixel-for-pixel (see *Testing*).
 
 ## Perspectives
 
@@ -89,3 +90,14 @@ The runnable `.prg` exports already contain this code; CIA timer IRQs are turned
 Copy the 2 KB charset to a 2 KB boundary in the VIC bank, e.g. `$3800`, then `LDA #$1E : STA $D018` (screen at `$0400`, chars at `$3800`). `apexscii-charset.prg` already loads to `$3800`.
 
 `apexscii-demo.prg` / the editor's "Map → runnable .prg" is self-contained: `LOAD"*",8,1` then `RUN`.
+
+## Testing
+
+`test/vice-check.js` runs each demo `.prg` from `out/` in [VICE](https://vice-emu.sourceforge.io/), saves a screenshot, and compares all 64,000 display pixels with the editor's own render of the same map. The status bar is predicted with VICE's copy of the C64 ROM font. VICE uses its own palette, so each editor colour must correspond to exactly one VICE colour; a wrong character, a wrong colour or a misplaced raster split shows up as differing pixels, with the first one reported by cell. It needs Node and a VICE install that has `bin/x64sc` and `C64/chargen-901225-01.bin`.
+
+```bash
+node build.js
+node test/vice-check.js "C:\path\to\GTK3VICE-3.10-win64"
+```
+
+Options: `--ntsc` runs on an NTSC machine, and `--cycles 12000000,15000017` takes a screenshot at each listed cycle count, so you can check that the raster split is stable across frames. The script prints one line per screen and ends with PASS or FAIL; it exits with 1 on any failure. Screenshots go to a temporary folder that is deleted afterwards.
