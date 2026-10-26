@@ -1,10 +1,10 @@
-// Runs every demo PRG in out/ under VICE and checks each screenshot pixel-for-pixel against the
-// editor's own render (with VICE's ROM font predicting the status bar).
+// Runs every specimen PRG in out/ under VICE and checks each screenshot pixel-for-pixel against
+// APEXSCII's own render of the same screen (with VICE's ROM font predicting the status row).
 //
 //   node test/vice-check.js <path to VICE folder> [--ntsc] [--cycles 12000000,15000017]
 //
 // The VICE folder is the one holding bin/x64sc.exe (or bin/x64sc) and C64/. Run `node build.js` first.
-// VICE uses its own palette, so each editor colour may map to exactly one VICE colour; any wrong
+// VICE uses its own palette, so each expected colour may map to exactly one VICE colour; any wrong
 // character, colour or misplaced raster split shows up as differing pixels.
 const fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib');
 const { spawnSync } = require('child_process');
@@ -17,7 +17,7 @@ const cycles = cyclesArg >= 0 ? args[cyclesArg + 1].split(',') : ['12000000'];
 if (!vice) { console.error('usage: node test/vice-check.js <VICE folder> [--ntsc] [--cycles N,N]'); process.exit(2); }
 
 const repo = path.join(__dirname, '..');
-const APEX = require(path.join(repo, 'apexscii-core.js'));
+const APEXSCII = require(path.join(repo, 'apexscii.js'));
 const exe = ['x64sc.exe', 'x64sc'].map(f => path.join(vice, 'bin', f)).find(f => fs.existsSync(f));
 const romFile = path.join(vice, 'C64', 'chargen-901225-01.bin');
 if (!exe || !fs.existsSync(romFile)) { console.error(`x64sc or C64/chargen-901225-01.bin not found under ${vice}`); process.exit(2); }
@@ -55,16 +55,15 @@ function decodePng(buf) {
   return { w, h, rgb };
 }
 
-const PAL = APEX.PALETTE.map(h => h.toLowerCase());
+const PAL = APEXSCII.PALETTE.map(h => h.toLowerCase());
 let failures = 0;
-for (const persp of Object.keys(APEX.PERSPECTIVES)) for (const mode of ['hires', 'mc']) {
+for (const persp of Object.keys(APEXSCII.PERSPECTIVES)) for (const mode of ['hires', 'mc']) {
   const tag = (persp === 'iso' ? '' : '-' + persp) + (mode === 'mc' ? '-mc' : '');
-  const prg = path.join(repo, 'out', `apexscii${tag}-demo.prg`);
+  const prg = path.join(repo, 'out', `apexscii${tag}-specimen.prg`);
 
-  // What the editor predicts, as palette indices, with the real ROM font in the status rows.
-  const { glyphs } = APEX.buildDefault(mode, persp), map = Object.assign(APEX.defaultMap(), { mode, persp });
-  const comp = APEX.composite(glyphs, APEX.renderScene(map), map);
-  const rgba = APEX.screenRGB(comp.chars, comp.screen, comp.color, map, rom);
+  // What APEXSCII predicts, as palette indices, with the real ROM font in the status row.
+  const sheet = APEXSCII.specimen(persp, mode);
+  const rgba = APEXSCII.screenRGB(sheet.chars, sheet.screen, sheet.color, sheet.opts, rom);
   const want = Int8Array.from({ length: 64000 }, (_, i) =>
     PAL.indexOf('#' + [0, 1, 2].map(k => rgba[i * 4 + k].toString(16).padStart(2, '0')).join('')));
 
@@ -89,12 +88,12 @@ for (const persp of Object.keys(APEX.PERSPECTIVES)) for (const mode of ['hires',
     // PAL screenshots put the display 35 lines down; otherwise (NTSC) use the best-matching offset.
     let r = compare(35);
     if (r.bad) for (let oy = 0; oy + 200 <= img.h; oy++) { const t = compare(oy); if (t.bad < r.bad) r = t; }
-    const border = img.rgb(4, 4), borderOk = !r.back.has(border) || r.back.get(border) === map.border;
+    const border = img.rgb(4, 4), borderOk = !r.back.has(border) || r.back.get(border) === sheet.opts.border;
     console.log(`${label} ${r.bad ? `${r.bad} pixels differ, first at ${r.first}` : 'all 64000 pixels match'}` +
       `${borderOk ? '' : ' · border colour WRONG'}`);
     if (r.bad || !borderOk) failures++;
   }
 }
 fs.rmSync(shots, { recursive: true, force: true });
-console.log(failures ? `FAIL: ${failures} screen(s) differ` : `PASS: every demo matches the editor${ntsc ? ' (NTSC)' : ''}`);
+console.log(failures ? `FAIL: ${failures} screen(s) differ` : `PASS: every specimen matches APEXSCII's render${ntsc ? ' (NTSC)' : ''}`);
 process.exitCode = failures ? 1 : 0;

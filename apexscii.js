@@ -1,0 +1,515 @@
+/*
+ * APEXSCII — PETSCII-style character sets for the Commodore 64, one per perspective:
+ * isometric 2:1, military 45°, top-down 3/4, side oblique and first-person dungeon,
+ * each in hi-res (8x8) and multicolor (4x8).
+ *
+ * Every set keeps PETSCII text at screen codes $00-$3F, then two shade sets (smooth and brick),
+ * line art and block elements; the rest of the 256 slots are free. buildDefault(mode, persp)
+ * returns the glyphs, their names and the layout regions.
+ *
+ * Also here: the C64 screen decoder, runnable .prg / .asm writers and specimen sheets.
+ * Works in the browser (window.APEXSCII) and in Node (require).
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.APEXSCII = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // ---------------------------------------------------------------- text font
+  const TEXT_NAMES = '@ABCDEFGHIJKLMNOPQRSTUVWXYZ[£]↑← !"#$%&\'()*+,-./0123456789:;<=>?';
+  const FONT_SRC = [
+    '..####.. .##..##. .##.###. .##.###. .##..... .##...#. ..####..', // @
+    '...##... ..####.. .##..##. .######. .##..##. .##..##. .##..##.', // A
+    '.#####.. .##..##. .##..##. .#####.. .##..##. .##..##. .#####..',
+    '..####.. .##..##. .##..... .##..... .##..... .##..##. ..####..',
+    '.####... .##.##.. .##..##. .##..##. .##..##. .##.##.. .####...',
+    '.######. .##..... .##..... .####... .##..... .##..... .######.',
+    '.######. .##..... .##..... .####... .##..... .##..... .##.....',
+    '..####.. .##..##. .##..... .##.###. .##..##. .##..##. ..####..',
+    '.##..##. .##..##. .##..##. .######. .##..##. .##..##. .##..##.',
+    '..####.. ...##... ...##... ...##... ...##... ...##... ..####..',
+    '...####. ....##.. ....##.. ....##.. ....##.. .##.##.. ..###...',
+    '.##..##. .##.##.. .####... .###.... .####... .##.##.. .##..##.',
+    '.##..... .##..... .##..... .##..... .##..... .##..... .######.',
+    '.##...## .###.### .####### .##.#.## .##...## .##...## .##...##',
+    '.##..##. .###.##. .######. .######. .##.###. .##..##. .##..##.',
+    '..####.. .##..##. .##..##. .##..##. .##..##. .##..##. ..####..',
+    '.#####.. .##..##. .##..##. .#####.. .##..... .##..... .##.....',
+    '..####.. .##..##. .##..##. .##..##. .##..##. ..####.. ....###.',
+    '.#####.. .##..##. .##..##. .#####.. .####... .##.##.. .##..##.',
+    '..####.. .##..##. .##..... ..####.. .....##. .##..##. ..####..',
+    '.######. ...##... ...##... ...##... ...##... ...##... ...##...',
+    '.##..##. .##..##. .##..##. .##..##. .##..##. .##..##. ..####..',
+    '.##..##. .##..##. .##..##. .##..##. .##..##. ..####.. ...##...',
+    '.##...## .##...## .##...## .##.#.## .####### .###.### .##...##',
+    '.##..##. .##..##. ..####.. ...##... ..####.. .##..##. .##..##.',
+    '.##..##. .##..##. .##..##. ..####.. ...##... ...##... ...##...',
+    '.######. .....##. ....##.. ...##... ..##.... .##..... .######.', // Z
+    '..####.. ..##.... ..##.... ..##.... ..##.... ..##.... ..####..', // [
+    '....##.. ...##.#. ..##.... .#####.. ..##.... .##...#. ######..', // £
+    '..####.. ....##.. ....##.. ....##.. ....##.. ....##.. ..####..', // ]
+    '...##... ..####.. .######. ...##... ...##... ...##... ...##...', // ↑
+    '........ ..#..... .##..... ######## .##..... ..#..... ........', // ←
+    '........',                                                        // space
+    '...##... ...##... ...##... ...##... ........ ........ ...##...', // !
+    '.##..##. .##..##. .##..##.',                                      // "
+    '.##..##. .##..##. ######## .##..##. ######## .##..##. .##..##.', // #
+    '...##... ..#####. .##..... ..####.. .....##. .#####.. ...##...', // $
+    '.##...#. .##..##. ....##.. ...##... ..##.... .##..##. .#...##.', // %
+    '..####.. .##..##. ..####.. ..###... .##..### .##..##. ..#####.', // &
+    '.....##. ....##.. ...##...',                                      // '
+    '....##.. ...##... ..##.... ..##.... ..##.... ...##... ....##..', // (
+    '..##.... ...##... ....##.. ....##.. ....##.. ...##... ..##....', // )
+    '........ .##..##. ..####.. ######## ..####.. .##..##. ........', // *
+    '........ ...##... ...##... .######. ...##... ...##... ........', // +
+    '........ ........ ........ ........ ........ ...##... ...##... ..##....', // ,
+    '........ ........ ........ .######.',                             // -
+    '........ ........ ........ ........ ........ ...##... ...##...', // .
+    '........ ......## .....##. ....##.. ...##... ..##.... .##.....', // /
+    '..####.. .##..##. .##.###. .###.##. .##..##. .##..##. ..####..', // 0
+    '...##... ..###... ...##... ...##... ...##... ...##... .######.',
+    '..####.. .##..##. .....##. ....##.. ..##.... .##..... .######.',
+    '..####.. .##..##. .....##. ...###.. .....##. .##..##. ..####..',
+    '.....##. ....###. ...####. .##..##. .####### .....##. .....##.',
+    '.######. .##..... .#####.. .....##. .....##. .##..##. ..####..',
+    '..####.. .##..##. .##..... .#####.. .##..##. .##..##. ..####..',
+    '.######. .##..##. ....##.. ...##... ...##... ...##... ...##...',
+    '..####.. .##..##. .##..##. ..####.. .##..##. .##..##. ..####..',
+    '..####.. .##..##. .##..##. ..#####. .....##. .##..##. ..####..', // 9
+    '........ ........ ...##... ........ ........ ...##... ........', // :
+    '........ ........ ...##... ........ ........ ...##... ...##... ..##....', // ;
+    '....###. ...###.. ..###... .###.... ..###... ...###.. ....###.', // <
+    '........ ........ .######. ........ .######.',                   // =
+    '.###.... ..###... ...###.. ....###. ...###.. ..###... .###....', // >
+    '..####.. .##..##. .....##. ....##.. ...##... ........ ...##...', // ?
+  ];
+
+  function parseGlyph(src) {
+    const rows = src.trim().split(/\s+/);
+    if (rows.length > 8) throw new Error('glyph has >8 rows: ' + src);
+    const g = new Uint8Array(8);
+    rows.forEach((r, y) => {
+      if (r.length !== 8) throw new Error('row not 8 wide: "' + r + '"');
+      for (let x = 0; x < 8; x++) if (r[x] === '#') g[y] |= 0x80 >> x;
+    });
+    return g;
+  }
+
+  // ---------------------------------------------------------- shade patterns
+  // Patterns are periodic in 8x8 so a glyph looks identical wherever it lands.
+  function brickWall(x, y) {
+    x &= 7; y &= 7;
+    if ((y & 3) === 3) return false;
+    return x !== (y < 4 ? 0 : 4);
+  }
+  const SETS = {
+    smooth: {
+      E: () => false,
+      T: () => true,
+      L: (x, y) => ((x + y) & 1) === 0,
+      R: (x, y) => (x & 1) === 0 && (y & 1) === 0,
+    },
+    brick: {
+      E: () => false,
+      T: (x, y) => !(((x & 3) === 0 && (y & 3) === 0) || ((x & 3) === 2 && (y & 3) === 2)),
+      L: brickWall,
+      R: (x, y) => brickWall(x, y) && ((x + y) & 1) === 0,
+    },
+  };
+  // Multicolor patterns work on 4x8 fat pixels: fn(fx, y) -> 2-bit value.
+  //   00 = $D021 background, 01 = $D022 (MC1), 10 = $D023 (MC2), 11 = the cell's colour RAM (0-7).
+  // The top face takes the cell colour, so materials share glyphs and differ only by colour;
+  // the left/right faces use the two shared shades.
+  function brickWallMC(fx, y) {
+    y &= 7;
+    if ((y & 3) === 3) return false;
+    return (fx & 3) !== (y < 4 ? 0 : 2);
+  }
+  const MC_SETS = {
+    smooth: { E: () => 0, T: () => 3, L: () => 1, R: () => 2 },
+    brick: {
+      E: () => 0,
+      T: (fx, y) => ((y & 3) === 0 && ((fx + (y >> 2)) & 1) === 0) ? 2 : 1, // light paving, dark joints
+      L: (fx, y) => brickWallMC(fx, y) ? 3 : 1,                             // bricks in cell colour, light mortar
+      R: (fx, y) => brickWallMC(fx, y) ? (((fx + y) & 1) ? 3 : 2) : 0,      // shaded bricks, dark mortar
+    },
+  };
+  // Dungeon faces: ceiling, ground, front wall, side wall, door (vertical planks).
+  Object.assign(SETS.smooth, { C: () => false, G: SETS.smooth.R, W: SETS.smooth.T, S: SETS.smooth.L, D: x => (x & 3) !== 3 });
+  Object.assign(SETS.brick, { C: () => false, G: SETS.brick.T, W: SETS.brick.L, S: SETS.brick.R, D: x => (x & 3) !== 3 });
+  Object.assign(MC_SETS.smooth, { C: () => 0, G: () => 2, W: () => 3, S: () => 1, D: fx => (fx & 1) ? 2 : 3 });
+  Object.assign(MC_SETS.brick, { C: () => 0, G: MC_SETS.brick.T, W: MC_SETS.brick.L, S: MC_SETS.brick.R, D: fx => (fx & 1) ? 2 : 3 });
+  const FACE_NAMES = { E: 'empty', T: 'top', L: 'left', R: 'right' };
+
+  // 45° boundaries, corner to corner across a cell: military, side oblique and dungeon views.
+  const B45 = [
+    { id: '/', name: '/ 45°', row: x => 7 - x },
+    { id: '\\', name: '\\ 45°', row: x => x },
+  ];
+
+  // Every perspective shares the text block at $00-$3F, then its own shade sets.
+  //   faces: what the pair glyphs combine; key: which pattern each face uses; solids: plain faces.
+  // The top-down 3/4 view has no slopes at all, so it carries outline variants instead.
+  const PERSPECTIVES = {
+    iso: { name: 'Isometric 2:1' },
+    military: {
+      name: 'Military 45°', faces: ['E', 'T', 'L', 'R'], solids: ['T', 'L', 'R'], bounds: B45,
+      key: { E: 'E', T: 'T', L: 'L', R: 'R' }, faceNames: FACE_NAMES,
+    },
+    oblique: {
+      name: 'Top-down 3/4', faces: [], solids: [], bounds: [], edges: true,
+      key: { T: 'T', F: 'L' }, faceNames: { T: 'top', F: 'front' },
+    },
+    side: {
+      name: 'Side oblique', faces: ['E', 'T', 'F', 'R'], solids: ['T', 'F', 'R'], bounds: [B45[0]],
+      key: { E: 'E', T: 'T', F: 'L', R: 'R' }, faceNames: { E: 'empty', T: 'top', F: 'front', R: 'side' },
+    },
+    dungeon: {
+      name: 'First-person dungeon', faces: ['C', 'G', 'W', 'S'], solids: ['C', 'G', 'W', 'S', 'D'], bounds: B45,
+      key: { C: 'C', G: 'G', W: 'W', S: 'S', D: 'D' },
+      faceNames: { C: 'ceiling', G: 'floor', W: 'front wall', S: 'side wall', D: 'door' },
+    },
+  };
+
+  // The four 2:1 slope boundaries; row(x) is the first row of the "below" region.
+  const BOUNDS = [
+    { id: '/u', name: '/ upper', row: x => 3 - (x >> 1) },
+    { id: '/l', name: '/ lower', row: x => 7 - (x >> 1) },
+    { id: '\\u', name: '\\ upper', row: x => x >> 1 },
+    { id: '\\l', name: '\\ lower', row: x => 4 + (x >> 1) },
+  ];
+  const FACES = ['E', 'T', 'L', 'R'];
+  const PAIRS = [];
+  for (const a of FACES) for (const b of FACES) if (a !== b) PAIRS.push([a, b]);
+
+  function glyphFrom(fn) {
+    const g = new Uint8Array(8);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if (fn(x, y)) g[y] |= 0x80 >> x;
+    return g;
+  }
+  function glyphFromMC(fn) {
+    const g = new Uint8Array(8);
+    for (let y = 0; y < 8; y++) for (let fx = 0; fx < 4; fx++) g[y] |= (fn(fx, y) & 3) << (6 - 2 * fx);
+    return g;
+  }
+
+  // ----------------------------------------------------------- default set
+  const REGIONS = [
+    { from: 0x00, to: 0x3f, name: 'text' },
+    { from: 0x40, to: 0x72, name: 'smooth' },
+    { from: 0x73, to: 0xa5, name: 'brick' },
+    { from: 0xa6, to: 0xad, name: 'lines' },
+    { from: 0xae, to: 0xb5, name: 'blocks' },
+    { from: 0xb6, to: 0xff, name: 'free' },
+  ];
+
+  // In multicolor mode the shade sets and free slots are fat-pixel glyphs; text, lines and
+  // blocks stay hi-res (they are shown with colour RAM 0-7, which keeps a cell hi-res).
+  const LAYOUTS = {};
+  const layout = persp => LAYOUTS[persp] || (LAYOUTS[persp] = buildDefault('hires', persp).regions);
+  function isMCSlot(i, persp = 'iso') {
+    const r = layout(persp).find(r => i >= r.from && i <= r.to);
+    return !['text', 'lines', 'blocks'].includes(r.name);
+  }
+
+  function buildDefault(mode = 'hires', persp = 'iso') {
+    return persp === 'iso' ? buildIso(mode) : buildPerspective(mode, persp);
+  }
+
+  const EDGE_BLOCK_GLYPHS = [
+    ['left edge', (x) => x === 0], ['right edge', (x) => x === 7],
+    ['top edge', (x, y) => y === 0], ['bottom edge', (x, y) => y === 7],
+    ['upper half', (x, y) => y < 4], ['lower half', (x, y) => y >= 4],
+    ['left half', (x) => x < 4], ['right half', (x) => x >= 4],
+    ['quad TL', (x, y) => x < 4 && y < 4], ['quad TR', (x, y) => x >= 4 && y < 4],
+    ['quad BL', (x, y) => x < 4 && y >= 4], ['quad BR', (x, y) => x >= 4 && y >= 4],
+  ];
+
+  function buildPerspective(mode, persp) {
+    const P = PERSPECTIVES[persp], mc = mode === 'mc';
+    const glyphs = [], names = [], regions = [];
+    for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
+    let i = 0, start = 0;
+    const add = (g, name) => { glyphs[i] = g; names[i++] = name; };
+    const region = name => { regions.push({ from: start, to: i - 1, name }); start = i; };
+    FONT_SRC.forEach((src, k) => add(parseGlyph(src), 'text ' + (TEXT_NAMES[k] === ' ' ? 'space' : TEXT_NAMES[k])));
+    region('text');
+    const pairs = [];
+    for (const a of P.faces) for (const b of P.faces) if (a !== b) pairs.push([a, b]);
+    for (const setName of ['smooth', 'brick']) {
+      const pat = f => (mc ? MC_SETS : SETS)[setName][P.key[f]], make = mc ? glyphFromMC : glyphFrom;
+      const row = mc ? (b, fx) => b.row(fx * 2) : (b, x) => b.row(x);
+      const label = (mc ? 'mc ' : '') + setName, fn = P.faceNames;
+      for (const f of P.solids) add(make(pat(f)), `${label} · ${fn[f]} face`);
+      for (const b of P.bounds) for (const [a, c] of pairs) {
+        add(make((x, y) => (y < row(b, x) ? pat(a) : pat(c))(x, y)), `${label} · ${b.name} · ${fn[a]} over ${fn[c]}`);
+      }
+      if (P.edges) {
+        // Outlines where a block drops away: top faces with any of N/E/S/W, front faces with W/E.
+        const maxX = mc ? 3 : 7, off = mc ? 0 : false;
+        for (let e = 0; e < 16; e++) {
+          const on = [e & 1 && 'N', e & 2 && 'E', e & 4 && 'S', e & 8 && 'W'].filter(Boolean);
+          add(make((x, y) => ((e & 1) && y === 0) || ((e & 4) && y === 7) || ((e & 8) && x === 0) || ((e & 2) && x === maxX)
+            ? off : pat('T')(x, y)), `${label} · top · ${on.length ? 'edges ' + on.join('') : 'no edges'}`);
+        }
+        for (let e = 0; e < 4; e++) {
+          add(make((x, y) => ((e & 1) && x === 0) || ((e & 2) && x === maxX) ? off : pat('F')(x, y)),
+            `${label} · front · ${['no edges', 'edge W', 'edge E', 'edges WE'][e]}`);
+        }
+      }
+      region(setName);
+    }
+    for (const b of P.bounds) add(glyphFrom((x, y) => y === b.row(x)), `line · ${b.name}`);
+    EDGE_BLOCK_GLYPHS.slice(0, 4).forEach(([n, fn]) => add(glyphFrom(fn), 'line · ' + n));
+    region('lines');
+    EDGE_BLOCK_GLYPHS.slice(4).forEach(([n, fn]) => add(glyphFrom(fn), 'block · ' + n));
+    region('blocks');
+    i = 256; region('free');
+    return { glyphs, names, regions };
+  }
+
+  function buildIso(mode) {
+    const mc = mode === 'mc';
+    const glyphs = [], names = [];
+    for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
+    let i = 0;
+    FONT_SRC.forEach((src, k) => {
+      glyphs[i] = parseGlyph(src);
+      names[i++] = 'text ' + (TEXT_NAMES[k] === ' ' ? 'space' : TEXT_NAMES[k]);
+    });
+    for (const setName of ['smooth', 'brick']) {
+      const set = (mc ? MC_SETS : SETS)[setName], make = mc ? glyphFromMC : glyphFrom;
+      const row = mc ? (b, fx) => b.row(fx * 2) : (b, x) => b.row(x);
+      const label = (mc ? 'mc ' : '') + setName;
+      for (const f of ['T', 'L', 'R']) {
+        glyphs[i] = make(set[f]);
+        names[i++] = `${label} · ${FACE_NAMES[f]} face`;
+      }
+      for (const b of BOUNDS) for (const [a, c] of PAIRS) {
+        glyphs[i] = make((x, y) => (y < row(b, x) ? set[a] : set[c])(x, y));
+        names[i++] = `${label} · ${b.name} · ${FACE_NAMES[a]} over ${FACE_NAMES[c]}`;
+      }
+    }
+    for (const b of BOUNDS) {
+      glyphs[i] = glyphFrom((x, y) => y === b.row(x));
+      names[i++] = `line · ${b.name}`;
+    }
+    [['left edge', (x) => x === 0], ['right edge', (x) => x === 7],
+     ['top edge', (x, y) => y === 0], ['bottom edge', (x, y) => y === 7],
+     ['upper half', (x, y) => y < 4], ['lower half', (x, y) => y >= 4],
+     ['left half', (x) => x < 4], ['right half', (x) => x >= 4],
+     ['quad TL', (x, y) => x < 4 && y < 4], ['quad TR', (x, y) => x >= 4 && y < 4],
+     ['quad BL', (x, y) => x < 4 && y >= 4], ['quad BR', (x, y) => x >= 4 && y >= 4],
+    ].forEach(([n, fn], k) => {
+      glyphs[i] = glyphFrom(fn);
+      names[i++] = (k < 4 ? 'line · ' : 'block · ') + n;
+    });
+    if (i !== 0xb6) throw new Error('layout drift: ended at ' + i.toString(16));
+    return { glyphs, names, regions: REGIONS };
+  }
+
+  // --------------------------------------------------------------- palette
+  const PALETTE = ['#000000', '#ffffff', '#68372b', '#70a4b2', '#6f3d86', '#588d43', '#352879', '#b8c76f',
+                   '#6f4f25', '#433900', '#9a6759', '#444444', '#6c6c6c', '#9ad284', '#6c5eb5', '#959595'];
+  const COLOR_NAMES = ['black', 'white', 'red', 'cyan', 'purple', 'green', 'blue', 'yellow',
+                       'orange', 'brown', 'light red', 'dark grey', 'grey', 'light green', 'light blue', 'light grey'];
+
+  // --------------------------------------------------------------- screens
+  const W = 320, H = 200;
+
+  function asciiToScreen(ch) {
+    const c = ch.toUpperCase().charCodeAt(0);
+    if (c >= 65 && c <= 90) return c - 64;
+    if (ch === '@') return 0;
+    if (ch === '[') return 27;
+    if (ch === ']') return 29;
+    if (c >= 32 && c <= 63) return c;
+    return 32;
+  }
+
+  // Decode a 40x25 screen the way the VIC does: in MC mode, colour RAM bit 3 makes a cell multicolor.
+  // opts: { mode, bg, mc1, mc2, romRows }. The bottom `romRows` rows come from the ROM font (see
+  // screenPrg): pass the 4K chargen ROM as `rom` for an exact picture; otherwise APEXSCII's own text
+  // glyphs stand in (inverted for reverse codes).
+  function screenRGB(chars, screen, color, opts, rom) {
+    const pal = PALETTE.map(h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16)));
+    const out = new Uint8ClampedArray(W * H * 4), mc = opts.mode === 'mc', firstRom = 25 - (opts.romRows || 0);
+    const romGlyph = code => {
+      if (rom) return rom.subarray(code * 8, code * 8 + 8);
+      const t = (code & 0x7f) < 0x40 ? chars[code & 0x3f] : new Uint8Array(8);
+      return code & 0x80 ? t.map(b => b ^ 0xff) : t;
+    };
+    for (let cy = 0; cy < 25; cy++) for (let cx = 0; cx < 40; cx++) {
+      const k = cy * 40 + cx, cr = color[k];
+      const g = cy >= firstRom ? romGlyph(screen[k]) : chars[screen[k]];
+      const multi = mc && (cr & 8);
+      const cols = multi ? [opts.bg, opts.mc1, opts.mc2, cr & 7] : [opts.bg, cr];
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const v = multi ? (g[y] >> (6 - 2 * (x >> 1))) & 3 : (g[y] >> (7 - x)) & 1;
+        const c = pal[cols[v]], p = ((cy * 8 + y) * W + cx * 8 + x) * 4;
+        out[p] = c[0]; out[p + 1] = c[1]; out[p + 2] = c[2]; out[p + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  // --------------------------------------------------------------- exports
+  function flatten(chars) {
+    const out = new Uint8Array(2048);
+    chars.forEach((g, i) => out.set(g, i * 8));
+    return out;
+  }
+  function charsetPrg(chars) {
+    const out = new Uint8Array(2050);
+    out[0] = 0x00; out[1] = 0x38; out.set(flatten(chars), 2);
+    return out;
+  }
+
+  // Self-contained runnable PRG for a 40x25 screen: BASIC "10 SYS2064", copies screen/colour/charset
+  // into place, points the VIC at $3800 and parks. Memory: $0A00 screen, $0E00 colour, $1200 charset.
+  // opts: { mode, bg, border, mc1, mc2, romRows }. Multicolor also sets $D022/$D023 and $D016 bit 4.
+  //
+  // With romRows > 0, a two-stage raster IRQ swaps $D018 every frame: APEXSCII ($1E) above, the ROM
+  // uppercase/graphics font ($14, VIC sees ROM at $1000) for the bottom rows. The swap is polled to
+  // the very start of the first ROM row's raster line, before the VIC fetches that line's glyphs.
+  // ROM rows should use colour RAM 0-7, so they stay hi-res in MC mode.
+  function screenPrg(chars, screen, color, opts) {
+    const { bg, border } = opts, ORG = 0x0810;
+    const SCR = 0x0a00, COL = 0x0e00, CHR = 0x1200, START = 0x0801, END = 0x1a00;
+    const split = (opts.romRows || 0) > 0;
+    const L = 51 + 8 * (25 - (opts.romRows || 0)); // first raster line of the ROM rows (PAL and NTSC)
+    const lo = v => v & 0xff, hi = v => v >> 8;
+    const labels = {};
+    // Two passes: the first records label addresses, the second fills in forward references.
+    const emit = () => {
+      const c = [], pc = () => ORG + c.length, mark = n => { labels[n] = pc(); };
+      const at = n => labels[n] || 0, rel = n => (at(n) - (pc() + 2)) & 0xff;
+      const setVec = n => c.push(0xa9, lo(at(n)), 0x8d, 0x14, 0x03, 0xa9, hi(at(n)), 0x8d, 0x15, 0x03); // $0314/5 = n
+      c.push(
+        0xa9, border & 15, 0x8d, 0x20, 0xd0,   // LDA #border : STA $D020
+        0xa9, bg & 15, 0x8d, 0x21, 0xd0,       // LDA #bg     : STA $D021
+        0xa9, 0x80, 0x8d, 0x91, 0x02);         // LDA #$80    : STA $0291 (lock shift+C= charset switch)
+      if (opts.mode === 'mc') c.push(
+        0xa9, opts.mc1 & 15, 0x8d, 0x22, 0xd0, // LDA #mc1    : STA $D022
+        0xa9, opts.mc2 & 15, 0x8d, 0x23, 0xd0, // LDA #mc2    : STA $D023
+        0xa9, 0xd8, 0x8d, 0x16, 0xd0);         // LDA #$D8    : STA $D016 (multicolor on)
+      c.push(0xa2, 0x00);                      // LDX #0
+      mark('copy');
+      for (let p = 0; p < 4; p++) c.push(0xbd, 0x00, hi(SCR) + p, 0x9d, 0x00, 0x04 + p); // LDA src,X : STA dst,X
+      for (let p = 0; p < 4; p++) c.push(0xbd, 0x00, hi(COL) + p, 0x9d, 0x00, 0xd8 + p);
+      for (let p = 0; p < 8; p++) c.push(0xbd, 0x00, hi(CHR) + p, 0x9d, 0x00, 0x38 + p);
+      c.push(0xe8);                                    // INX
+      c.push(0xd0, rel('copy'));                       // BNE copy
+      c.push(0xa9, 0x1e, 0x8d, 0x18, 0xd0);            // LDA #$1E : STA $D018
+      if (split) {
+        c.push(0x78);                                  // SEI
+        c.push(0xa9, 0x7f, 0x8d, 0x0d, 0xdc);          // LDA #$7F : STA $DC0D (CIA timer IRQs off)
+        c.push(0xad, 0x0d, 0xdc);                      // LDA $DC0D (ack)
+        c.push(0xa9, 0x01, 0x8d, 0x1a, 0xd0);          // LDA #1 : STA $D01A (raster IRQ on)
+        c.push(0xad, 0x11, 0xd0, 0x29, 0x7f, 0x8d, 0x11, 0xd0); // clear raster bit 8
+        c.push(0xa9, L - 2, 0x8d, 0x12, 0xd0);         // first IRQ two lines above the split
+        setVec('split');
+        c.push(0x58);                                  // CLI
+      }
+      mark('park');
+      c.push(0x4c, lo(at('park')), hi(at('park')));    // JMP park
+      if (split) {
+        mark('split');
+        c.push(0xa9, L, 0xa2, 0x14);                   // LDA #L : LDX #$14
+        mark('wait');
+        c.push(0xcd, 0x12, 0xd0);                      // CMP $D012
+        c.push(0xd0, rel('wait'));                     // BNE wait
+        c.push(0x8e, 0x18, 0xd0);                      // STX $D018 (ROM font from here down)
+        c.push(0xa9, 0x00, 0x8d, 0x12, 0xd0);          // next IRQ at line 0
+        setVec('top');
+        c.push(0xa9, 0xff, 0x8d, 0x19, 0xd0);          // ack VIC IRQ
+        c.push(0x4c, 0x81, 0xea);                      // JMP $EA81 (restore regs, RTI)
+        mark('top');
+        c.push(0xa9, 0x1e, 0x8d, 0x18, 0xd0);          // APEXSCII above the split
+        c.push(0xa9, L - 2, 0x8d, 0x12, 0xd0);
+        setVec('split');
+        c.push(0xa9, 0xff, 0x8d, 0x19, 0xd0);
+        c.push(0x4c, 0x31, 0xea);                      // JMP $EA31 (KERNAL keyboard/jiffy once a frame)
+      }
+      return c;
+    };
+    emit();
+    const code = emit();
+    if (ORG + code.length > SCR) throw new Error('PRG code overruns screen data');
+    const mem = new Uint8Array(END - START);
+    const put = (addr, bytes) => mem.set(bytes, addr - START);
+    put(0x0801, [0x0b, 0x08, 0x0a, 0x00, 0x9e, 0x32, 0x30, 0x36, 0x34, 0x00, 0x00, 0x00]);
+    put(ORG, code);
+    put(SCR, screen);
+    put(COL, color.map(c => c & 15));
+    put(CHR, flatten(chars));
+    const out = new Uint8Array(mem.length + 2);
+    out[0] = 0x01; out[1] = 0x08; out.set(mem, 2);
+    return out;
+  }
+
+  const hex = (v, w = 2) => '$' + v.toString(16).toUpperCase().padStart(w, '0');
+  function charsetAsm(chars, names) {
+    const lines = ['; APEXSCII character set — 256 glyphs x 8 bytes', '; load/copy to a 2K boundary, e.g. $3800 (VIC $D018 = $1E)', 'apexscii:'];
+    chars.forEach((g, i) => lines.push(`    .byte ${Array.from(g, b => hex(b)).join(',')}  ; ${hex(i)} ${names[i] || ''}`));
+    return lines.join('\n') + '\n';
+  }
+  function screenAsm(screen, color, label = 'screen') {
+    const out = ['; APEXSCII screen — 40x25 screen codes then colour RAM values', `${label}_codes:`];
+    for (let r = 0; r < 25; r++) out.push('    .byte ' + Array.from(screen.slice(r * 40, r * 40 + 40), b => hex(b)).join(','));
+    out.push(`${label}_color:`);
+    for (let r = 0; r < 25; r++) out.push('    .byte ' + Array.from(color.slice(r * 40, r * 40 + 40), b => hex(b)).join(','));
+    return out.join('\n') + '\n';
+  }
+
+  // -------------------------------------------------------------- specimens
+  // A specimen sheet shows a whole set on the C64: the 256 glyphs as a 16x16 grid with hex labels
+  // (columns spaced for legibility), the layout regions underneath, and a status row in the ROM
+  // font, so the raster split is exercised too. Text stays below colour 8, so it is hi-res in MC.
+  function specimen(persp = 'iso', mode = 'hires') {
+    const { glyphs, regions } = buildDefault(mode, persp), mc = mode === 'mc';
+    const ink = mc ? { title: 7, sub: 1, label: 3, legend: 1 } : { title: 7, sub: 15, label: 12, legend: 15 };
+    const screen = new Uint8Array(1000).fill(0x20), color = new Uint8Array(1000).fill(1);
+    const text = (row, col, s, c, rev) => {
+      for (let k = 0; k < s.length && col + k < 40; k++) {
+        screen[row * 40 + col + k] = asciiToScreen(s[k]) | (rev ? 0x80 : 0);
+        color[row * 40 + col + k] = c;
+      }
+    };
+    const centre = (row, s, c, rev) => text(row, (40 - s.length) >> 1, s, c, rev);
+    const HEX = '0123456789ABCDEF';
+    centre(0, 'APEXSCII ' + PERSPECTIVES[persp].name.toUpperCase().replace('°', ''), ink.title);
+    centre(1, mc ? 'MULTICOLOR 4X8' : 'HI-RES 8X8', ink.sub);
+    for (let k = 0; k < 16; k++) text(3, 7 + 2 * k, HEX[k], ink.label);
+    for (let r = 0; r < 16; r++) {
+      text(4 + r, 3, HEX[r] + '0', ink.label);
+      for (let k = 0; k < 16; k++) {
+        const code = r * 16 + k, at = (4 + r) * 40 + 7 + 2 * k, region = regions.find(g => code >= g.from && code <= g.to).name;
+        screen[at] = code;
+        // MC slots use green as the cell colour; hi-res glyphs: white text, green sets, grey line art.
+        const hires = region === 'text' ? 1 : region === 'lines' || region === 'blocks' ? (mc ? 7 : 15) : 13;
+        color[at] = mc && isMCSlot(code, persp) ? 8 | 5 : hires;
+      }
+    }
+    // Region legend, wrapped over two rows.
+    const items = regions.map(g => `${g.name.toUpperCase()} ${g.from.toString(16).toUpperCase().padStart(2, '0')}-${g.to.toString(16).toUpperCase()}`);
+    const lines = [''];
+    for (const it of items) {
+      const cur = lines[lines.length - 1];
+      if ((cur ? cur.length + 2 : 0) + it.length > 38) lines.push(it); else lines[lines.length - 1] = cur ? cur + '  ' + it : it;
+    }
+    lines.slice(0, 2).forEach((l, i) => centre(21 + i, l, ink.legend));
+    const tag = ' ROM FONT ', rest = ' STATUS ROW', start = (40 - tag.length - rest.length) >> 1;
+    text(24, start, tag, 7, true);
+    text(24, start + tag.length, rest, 7);
+    return { chars: glyphs, screen, color, opts: { mode, bg: 0, border: 0, mc1: 12, mc2: 11, romRows: 1 } };
+  }
+  const specimenPrg = (persp, mode) => { const s = specimen(persp, mode); return screenPrg(s.chars, s.screen, s.color, s.opts); };
+
+  return {
+    W, H, PALETTE, COLOR_NAMES, REGIONS, PERSPECTIVES, SETS, MC_SETS, BOUNDS, B45, PAIRS, FACE_NAMES,
+    glyphFrom, glyphFromMC, buildDefault, layout, isMCSlot, asciiToScreen,
+    screenRGB, screenPrg, screenAsm, flatten, charsetPrg, charsetAsm, hex, specimen, specimenPrg,
+  };
+});
