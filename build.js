@@ -1,4 +1,5 @@
-// Builds the default APEXSCII files (hi-res and multicolor) into ./out:  node build.js
+// Builds the default APEXSCII files for every perspective (hi-res and multicolor) into ./out:
+//   node build.js
 const fs = require('fs');
 const path = require('path');
 const APEX = require('./apexscii-core.js');
@@ -6,10 +7,11 @@ const APEX = require('./apexscii-core.js');
 const out = path.join(__dirname, 'out');
 fs.mkdirSync(out, { recursive: true });
 
-for (const mode of ['hires', 'mc']) {
-  const tag = mode === 'mc' ? '-mc' : '';
-  const { glyphs, names } = APEX.buildDefault(mode);
-  const map = Object.assign(APEX.defaultMap(), { mode });
+for (const persp of Object.keys(APEX.PERSPECTIVES)) for (const mode of ['hires', 'mc']) {
+  // Isometric keeps its original file names; the other views are tagged with the perspective.
+  const tag = (persp === 'iso' ? '' : '-' + persp) + (mode === 'mc' ? '-mc' : '');
+  const { glyphs, names } = APEX.buildDefault(mode, persp);
+  const map = Object.assign(APEX.defaultMap(), { mode, persp });
   const comp = APEX.composite(glyphs, APEX.renderScene(map), map);
 
   const files = {
@@ -21,7 +23,7 @@ for (const mode of ['hires', 'mc']) {
   };
   for (const [name, data] of Object.entries(files)) {
     fs.writeFileSync(path.join(out, name), typeof data === 'string' ? data : Buffer.from(data));
-    console.log(name.padEnd(28), (typeof data === 'string' ? Buffer.byteLength(data) : data.length) + ' bytes');
   }
-  console.log(`${mode} demo: ${comp.allocated.length}/${comp.freeTotal} free slots used, ${comp.overflow} overflow cells\n`);
+  console.log(`${(persp + ' ' + mode).padEnd(16)} ${Object.keys(files).length} files · demo uses ` +
+    `${comp.allocated.length}/${comp.freeTotal} free slots, ${comp.overflow} overflow`);
 }

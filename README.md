@@ -1,13 +1,29 @@
 # APEXSCII
 
-An isometric, PETSCII-style character set for the Commodore 64 (8×8 hi-res, 2:1 slopes).
+PETSCII-style character sets for the Commodore 64, one per perspective: isometric 2:1, military 45°, top-down 3/4, side oblique and first-person dungeon. Each comes in hi-res (8×8) and multicolor (4×8).
 
-- `apexscii.html` — editor: paint an 8×8 iso map, edit glyphs, export. Serve the folder (`python -m http.server`) and open it.
+- `apexscii.html` — map editor: build a map, switch perspective, edit glyphs, export. Serve the folder (`python -m http.server`) and open it.
 - `art.html` — art tool: draw characters and multi-character tiles (see below).
-- `apexscii-core.js` — charset generator, iso rasteriser, compositor, PRG/asm exporters (browser + Node).
-- `build.js` — `node build.js` writes the default files to `out/`.
+- `apexscii-core.js` — charset generators, renderers, compositor, PRG/asm exporters (browser + Node).
+- `build.js` — `node build.js` writes the default files for every perspective to `out/`.
 
-## Layout (screen codes)
+## Perspectives
+
+The isometric, military, top-down and side views all render the **same 8×8 height map**, so one world can be shown from any of them. The dungeon has its own 16×16 maze (`#` wall, `D` door, `.` floor), a player position and a facing. Every perspective has its own 256-character set; all of them keep the text block at `$00-$3F`, the ROM-font status bar, multicolor and the exports.
+
+| View | Geometry | Shade-set glyphs |
+|------|----------|------------------|
+| Isometric 2:1 | 32×16 diamond (4×2 chars), cube 4×4 | 3 faces + 4 slopes × 12 pairs = 51 per set |
+| Military 45° | 16×16 diamond (2×2), 8px of wall per height unit | 3 faces + 2 slopes × 12 pairs = 27 |
+| Top-down 3/4 | 16×16 top (2×2), 8px front face per height unit; no slopes | 16 top-face outline variants + 4 front-face variants = 20 |
+| Side oblique | 16×16 front, top and side recede up-right at 45° | 3 faces + 1 slope × 12 pairs = 15 |
+| First-person dungeon | 160×128 view, wall boxes 80/56/40/32 wide, so every edge is 45° on char corners | 5 faces (ceiling, floor, front wall, side wall, door) + 2 slopes × 12 pairs = 29 |
+
+Each perspective has two shade sets (smooth and brick), then line art and block elements; the rest is free for the compositor. In the map editor the dungeon is driven with the arrow keys or WASD, and the mini grid edits the maze. The 45° slopes go corner to corner across a cell; in multicolor they step two rows per fat pixel.
+
+Files in `out/` are tagged by perspective, e.g. `apexscii-side-mc.bin`; the isometric files keep their original names.
+
+## Isometric layout (screen codes)
 
 | Range     | Contents |
 |-----------|----------|
@@ -32,7 +48,7 @@ Each shade set holds 51 glyphs: 3 solid faces plus 4 slope boundaries (`/` upper
   Turn off *protect shared glyphs* to edit the glyph itself everywhere it's used. *Stamp char*, *Pick* and *Cell colour* work on whole cells, like a PETSCII editor.
 - **Characters**: edit any of the 256 glyphs directly, in place.
 
-Tools: pencil, line (with *iso snap* to horizontal, vertical or clean 2:1 slopes), rectangle, 2:1 diamond (it draws exactly the staircase the built-in floor glyphs use), and flood fill. Also flip, shift, invert, copy/paste and undo/redo (Ctrl+Z / Ctrl+Y). Left button draws, right button erases. In multicolor, the canvas paints 4×8 fat pixels with the four pens. The preview shows the tile 3×3 in an iso lattice, so you can check the seams.
+Tools: pencil, line (with *angle snap* to horizontal, vertical or the view's slope: 2:1 in isometric, 45° in the others), rectangle, diamond (2:1 or 45° to match the view; it draws exactly the staircase the built-in floor glyphs use), and flood fill. Also flip, shift, invert, copy/paste and undo/redo (Ctrl+Z / Ctrl+Y). Left button draws, right button erases. In multicolor, the canvas paints 4×8 fat pixels with the four pens. The preview shows the tile 3×3 in the view's own lattice, so you can check the seams. The *View* menu switches perspective; each one keeps its own charset and tiles.
 
 The character set is stored under the same browser key as the map editor's, and each page picks up the other's changes live. Exports: charset `.bin`/`.prg`/`.asm`, tiles `.asm` (width, height, screen codes, colour RAM values), a `.png` tile sheet, and a project `.json` you can reopen later.
 

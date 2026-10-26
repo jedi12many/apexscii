@@ -42,7 +42,7 @@
   .tile { display: flex; gap: 8px; align-items: center; padding: 4px; border: 1px solid transparent; border-radius: 5px; cursor: pointer; }
   .tile:hover { border-color: var(--line); }
   .tile.on { border-color: var(--accent); background: #26234f; }
-  .tile canvas { background: #000; flex: none; }
+  .tile canvas { background: #000; flex: none; max-width: 120px; height: auto; }
   .tile small { color: var(--dim); display: block; }
   #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--warn); color: #201000;
            padding: 8px 14px; border-radius: 6px; display: none; }
@@ -52,6 +52,7 @@
 <header>
   <h1>APEXSCII ART</h1>
   <button id="tabTiles">Tiles</button><button id="tabChars">Characters</button>
+  <span class="lbl">View</span><select id="persp"></select>
   <span class="lbl">Mode</span><button id="mHires">Hi-res</button><button id="mMc">Multicolor</button>
   <span id="mcSel" class="lbl">BG <select id="bg"></select> MC1 <select id="mc1"></select> MC2 <select id="mc2"></select></span>
   <span style="flex:1"></span>
@@ -76,10 +77,10 @@
     <section>
       <div class="row" id="tools"></div>
       <div class="row">
-        <label><input type="checkbox" id="optSnap" checked> iso snap</label>
+        <label><input type="checkbox" id="optSnap" checked> angle snap</label>
         <label><input type="checkbox" id="optFill"> filled shapes</label>
         <label><input type="checkbox" id="optPx" checked> pixel grid</label>
-        <label><input type="checkbox" id="optIso" checked> iso guides</label>
+        <label><input type="checkbox" id="optIso" checked> guides</label>
         <label id="protectLbl"><input type="checkbox" id="optProtect" checked> protect shared glyphs</label>
         <span style="flex:1"></span>
         <button id="undo" title="Ctrl+Z">Undo</button><button id="redo" title="Ctrl+Y">Redo</button>
@@ -112,7 +113,7 @@
     </section>
     <section>
       <h2>Preview</h2>
-      <div class="row"><button id="pvIso">Iso lattice</button><button id="pvGrid">Grid</button></div>
+      <div class="row"><button id="pvIso">Lattice</button><button id="pvGrid">Grid</button></div>
       <canvas id="pv" width="268" height="200" style="background:#000"></canvas>
     </section>
     <section>
@@ -138,10 +139,13 @@
 const $ = id => document.getElementById(id);
 const PAL = APEX.PALETTE;
 const PAL_RGB = PAL.map(h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16)));
-const DEF = { hires: APEX.buildDefault('hires'), mc: APEX.buildDefault('mc') };
+// Each perspective and mode has its own default charset, built on first use.
+const DEFS = {};
+const defs = () => DEFS[S.persp + S.mode] || (DEFS[S.persp + S.mode] = APEX.buildDefault(S.mode, S.persp));
+const freeFrom = () => defs().regions.find(r => r.name === 'free').from;
 const KEY = {
-  cs: m => m === 'mc' ? 'apexscii.charset.mc' : 'apexscii.charset', // shared with the map editor
-  tiles: m => 'apexscii.tiles.' + m,
+  cs: m => APEX.charsetKey(S.persp, m), // shared with the map editor
+  tiles: m => S.persp === 'iso' ? 'apexscii.tiles.' + m : `apexscii.${S.persp}.tiles.${m}`,
   art: 'apexscii.art',
 };
 const store = {
@@ -155,8 +159,8 @@ const same = (a, b) => a.every((v, i) => v === b[i]);
 
 // ------------------------------------------------------------------ state
 let S = (() => {
-  try { const s = JSON.parse(store.get(KEY.art)); if (s && s.mode) return s; } catch (e) {}
-  return { mode: 'hires', bg: 0, mc1: 12, mc2: 11, color: 1, pen: 3, tab: 'tiles', preview: 'iso' };
+  try { const s = JSON.parse(store.get(KEY.art)); if (s && s.mode) return Object.assign({ persp: 'iso' }, s); } catch (e) {}
+  return { persp: 'iso', mode: 'hires', bg: 0, mc1: 12, mc2: 11, color: 1, pen: 3, tab: 'tiles', preview: 'iso' };
 })();
 let chars, tiles, cur = 0, sel = 0x40, tool = 'pencil', clip = null;
 let drag = null, work = null, ks = null, base0 = null, hover = null;
@@ -164,10 +168,10 @@ const undoStack = [], redoStack = [];
 
 function loadMode() {
   const cs = store.get(KEY.cs(S.mode));
-  chars = cs && cs.length === 4096 ? fromHex(cs) : DEF[S.mode].glyphs.map(g => Uint8Array.from(g));
+  chars = cs && cs.length === 4096 ? fromHex(cs) : defs().glyphs.map(g => Uint8Array.from(g));
   let t = null;
   try { t = JSON.parse(store.get(KEY.tiles(S.mode))); } catch (e) {}
-  if (!Array.isArray(t) || !t.length) { t = APEX.starterTiles(chars, S.mode); tiles = t; save(); }
+  if (!Array.isArray(t) || !t.length) { t = APEX.starterTiles(chars, S.mode, S.persp); tiles = t; save(); }
   tiles = t;
   cur = Math.min(cur, tiles.length - 1);
 }
@@ -194,7 +198,7 @@ const mcProject = () => S.mode === 'mc';
 const cellIsMC = k => mcProject() && (k & 8) !== 0;
 // Colour RAM value for new ink: multicolor cells keep bit 3; hi-res cells in an MC project stay below 8.
 const inkK = mcCell => mcCell ? 8 | (S.color & 7) : mcProject() ? S.color & 7 : S.color;
-function glyphK() { return inkK(mcProject() && APEX.isMCSlot(sel)); }
+function glyphK() { return inkK(mcProject() && APEX.isMCSlot(sel, S.persp)); }
 function surf() {
   if (S.tab === 'chars') return { w: 1, h: 1, cells: [{ c: sel, k: glyphK() }], glyph: true };
   return tiles[cur];
@@ -233,8 +237,9 @@ function findGlyph(bytes) {
 }
 function freeSlot() {
   const order = [];
-  for (let i = 0xb6; i < 256; i++) order.push(i);
-  for (let i = 0x40; i < 0xb6; i++) order.push(i);
+  const f0 = freeFrom();
+  for (let i = f0; i < 256; i++) order.push(i);
+  for (let i = 0x40; i < f0; i++) order.push(i);
   return order.find(i => isZero(chars[i]) && usage(i) === 0) ?? -1;
 }
 // A tile cell's pixels changed: reuse an identical glyph, else edit its private glyph, else claim a
@@ -243,11 +248,11 @@ function resolve(t, ci, bytes) {
   const cell = t.cells[ci];
   const match = findGlyph(bytes);
   if (match >= 0) { cell.c = match; return; }
-  if (cell.c !== 0x20 && (!$('optProtect').checked || (cell.c >= 0xb6 && usage(cell.c) === 1))) {
+  if (cell.c !== 0x20 && (!$('optProtect').checked || (cell.c >= freeFrom() && usage(cell.c) === 1))) {
     chars[cell.c] = bytes; return;
   }
   const slot = freeSlot();
-  if (slot < 0) { toast('Character set is full — free some glyphs in $B6-$FF.'); return; }
+  if (slot < 0) { toast(`Character set is full — free some glyphs in ${APEX.hex(freeFrom())}-$FF.`); return; }
   chars[slot] = bytes; cell.c = slot;
 }
 
@@ -286,16 +291,18 @@ function bresenham(x0, y0, x1, y1) {
   }
   return pts;
 }
-// Iso snap: horizontal, vertical, or a clean 2:1 staircase (two pixels across per row).
-function isoLine(x0, y0, x1, y1) {
+// Angle snap: horizontal, vertical, or a clean staircase along the view's slope — 2:1 in the
+// isometric view (two pixels across per row), 45° in the others.
+function snapLine(x0, y0, x1, y1) {
+  const r = S.persp === 'iso' ? 2 : 1, a = Math.atan(1 / r) * 180 / Math.PI;
   const dx = x1 - x0, dy = y1 - y0, ang = Math.atan2(dy, dx) * 180 / Math.PI;
-  const dirs = [0, 26.565, 90, 153.435, 180, -153.435, -90, -26.565];
-  const best = dirs.reduce((a, d) => Math.abs(((ang - d + 540) % 360) - 180) < Math.abs(((ang - a + 540) % 360) - 180) ? d : a);
+  const dirs = [0, a, 90, 180 - a, 180, a - 180, -90, -a];
+  const best = dirs.reduce((p, d) => Math.abs(((ang - d + 540) % 360) - 180) < Math.abs(((ang - p + 540) % 360) - 180) ? d : p);
   if (best === 0 || best === 180) return bresenham(x0, y0, x1, y0);
   if (Math.abs(best) === 90) return bresenham(x0, y0, x0, y1);
   const sx = Math.abs(best) < 90 ? 1 : -1, sy = best > 0 ? 1 : -1;
-  const n = Math.round((2 * Math.abs(dx) + Math.abs(dy)) / 5), pts = [];
-  for (let k = 0; k <= n; k++) pts.push([x0 + sx * 2 * k, y0 + sy * k], [x0 + sx * (2 * k + 1), y0 + sy * k]);
+  const n = Math.round((r * Math.abs(dx) + Math.abs(dy)) / (r * r + 1)), pts = [];
+  for (let k = 0; k <= n; k++) for (let j = 0; j < r; j++) pts.push([x0 + sx * (r * k + j), y0 + sy * k]);
   return pts;
 }
 function rectPts(x0, y0, x1, y1, filled) {
@@ -304,11 +311,13 @@ function rectPts(x0, y0, x1, y1, filled) {
     if (filled || y === ay || y === by || x === ax || x === bx) pts.push([x, y]);
   return pts;
 }
-// 2:1 diamond using the same staircase as the APEXSCII slope glyphs; width snaps to multiples of 4.
+// Diamond using the same staircase as the slope glyphs: 2:1 in the isometric view (width snaps to
+// multiples of 4), 45° in the others.
 function diamondPts(x0, y0, x1, filled) {
-  const w = Math.max(4, Math.round(Math.abs(x1 - x0) / 4) * 4), h = w / 2, left = x1 < x0 ? x0 - w : x0, pts = [];
+  const iso = S.persp === 'iso', q = iso ? 4 : 2;
+  const w = Math.max(q, Math.round(Math.abs(x1 - x0) / q) * q), h = iso ? w / 2 : w, left = x1 < x0 ? x0 - w : x0, pts = [];
   for (let px = 0; px < w; px++) {
-    const l = px < w / 2 ? px : w - 1 - px, top = h / 2 - 1 - (l >> 1), bot = h / 2 + (l >> 1);
+    const l = px < w / 2 ? px : w - 1 - px, step = iso ? l >> 1 : l, top = h / 2 - 1 - step, bot = h / 2 + step;
     for (let py = top; py < bot; py++) if (filled || py === top || py === bot - 1) pts.push([left + px, y0 + py]);
   }
   return pts;
@@ -348,7 +357,7 @@ function cellTool(p, erase) {
   if (tool === 'pick') { sel = cell.c; S.color = cellIsMC(cell.k) ? cell.k & 7 : cell.k; renderAll(); return; }
   if (tool === 'stamp') {
     const c = erase ? 0x20 : sel;
-    cell.c = c; cell.k = inkK(mcProject() && APEX.isMCSlot(c));
+    cell.c = c; cell.k = inkK(mcProject() && APEX.isMCSlot(c, S.persp));
   }
   if (tool === 'paint') cell.k = inkK(cellIsMC(cell.k));
   save(); renderAll();
@@ -396,7 +405,7 @@ function shape(s, p) {
   work = base0.slice(); ks = drag.ks0.slice();
   const [x0, y0] = drag.start, filled = $('optFill').checked;
   let pts;
-  if (tool === 'line') pts = $('optSnap').checked ? isoLine(x0, y0, p[0], p[1]) : bresenham(x0, y0, p[0], p[1]);
+  if (tool === 'line') pts = $('optSnap').checked ? snapLine(x0, y0, p[0], p[1]) : bresenham(x0, y0, p[0], p[1]);
   else if (tool === 'rect') pts = rectPts(x0, y0, p[0], p[1], filled);
   else pts = diamondPts(x0, y0, p[0], filled);
   for (const [x, y] of pts) put(s, x, y, drag.v);
@@ -489,9 +498,12 @@ function drawCanvas() {
   for (let x = 0; x <= PW; x += 8) line(x * z + .5, 0, x * z + .5, PH * z);
   for (let y = 0; y <= PH; y += 8) line(0, y * z + .5, PW * z, y * z + .5);
   ctx.stroke();
-  if ($('optIso').checked && !s.glyph) { // 2:1 lattice: 32x16 diamonds with vertices on char corners
+  // Guide lines along the view's slopes, through char corners: 2:1 for iso, 45° for the others.
+  const guide = { iso: [16, 0.5], military: [16, 1], side: [8, 1], dungeon: [8, 1] }[S.persp];
+  if ($('optIso').checked && !s.glyph && guide) {
+    const [step, m] = guide;
     ctx.save(); ctx.strokeStyle = 'rgba(154,210,132,0.45)'; ctx.setLineDash([4, 4]); ctx.beginPath();
-    for (let c = -PW; c <= PH + PW; c += 16) { line(0, c * z, PW * z, (c + PW / 2) * z); line(0, c * z, PW * z, (c - PW / 2) * z); }
+    for (let c = -PW; c <= PH + PW; c += step) { line(0, c * z, PW * z, (c + PW * m) * z); line(0, c * z, PW * z, (c - PW * m) * z); }
     ctx.stroke(); ctx.restore();
   }
   if (hover && !drag && hover[0] < PW && hover[1] < PH) { // hover can be stale after switching surfaces
@@ -514,9 +526,9 @@ function showStatus(p) {
     `${glyphName(cell.c)} · ${mc ? 'MC ' : ''}${APEX.COLOR_NAMES[mc ? cell.k & 7 : cell.k & 15]}`;
 }
 function glyphName(i) {
-  const d = DEF[S.mode];
+  const d = defs();
   if (same(chars[i], d.glyphs[i])) return d.names[i];
-  return i >= 0xb6 ? 'tile glyph' : d.names[i] + ' (edited)';
+  return i >= freeFrom() ? 'tile glyph' : d.names[i] + ' (edited)';
 }
 
 function drawCharset() {
@@ -525,9 +537,9 @@ function drawCharset() {
   const mcCols = [S.bg, S.mc1, S.mc2, S.color & 7];
   for (let i = 0; i < 256; i++) {
     const ox = 2 + (i % 16) * Z, oy = 2 + ((i / 16) | 0) * Z, g = chars[i];
-    ctx.fillStyle = i >= 0xb6 ? '#1a1838' : i < 0x40 ? '#2b2860' : '#232050';
+    ctx.fillStyle = i >= freeFrom() ? '#1a1838' : i < 0x40 ? '#2b2860' : '#232050';
     ctx.fillRect(ox, oy, 25, 25);
-    if (mcProject() && APEX.isMCSlot(i)) {
+    if (mcProject() && APEX.isMCSlot(i, S.persp)) {
       for (let y = 0; y < 8; y++) for (let fx = 0; fx < 4; fx++) {
         const v = (g[y] >> (6 - 2 * fx)) & 3;
         if (v) { ctx.fillStyle = PAL[mcCols[v]]; ctx.fillRect(ox + 1 + fx * 6, oy + 1 + y * 3, 6, 3); }
@@ -600,25 +612,36 @@ function drawTiles() {
 }
 const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Where n x n copies of a tile go in each view's lattice, listed back to front.
+function lattice(kind, PW, PH, n) {
+  const pos = [];
+  if (kind === 'iso' || kind === 'military') { // diamonds: iso steps a quarter of the width down, military half
+    const sy = kind === 'iso' ? PW / 4 : PW / 2;
+    for (let sum = 0; sum <= 2 * n - 2; sum++) for (let i = 0; i < n; i++) {
+      const j = sum - i;
+      if (j >= 0 && j < n) pos.push([(i - j + n - 1) * PW / 2, (i + j) * sy]);
+    }
+  } else if (kind === 'side') { // blocks recede up-right 8px per row; the front face is the tile minus its side
+    for (let j = n - 1; j >= 0; j--) for (let i = 0; i < n; i++) pos.push([i * (PW - 8) + j * 8, (n - 1 - j) * 8]);
+  } else if (kind === 'oblique') { // rows step one top face down; a front face is covered by the row in front
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) pos.push([i * PW, j * Math.min(PW, PH)]);
+  } else for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) pos.push([i * PW, j * PH]);
+  return pos;
+}
+
 function drawPreview() {
   const s = surf(), [PW, PH] = dims(s), ctx = $('pv').getContext('2d'), rgba = tileRGBA(s, work, s.glyph ? null : ks);
   ctx.fillStyle = PAL[S.bg]; ctx.fillRect(0, 0, 268, 200);
-  const iso = S.preview === 'iso' && !s.glyph, n = 3;
-  // Iso lattice steps by half the tile width across and a quarter down, back to front.
-  const stepX = iso ? PW / 2 : PW, stepY = iso ? PW / 4 : PH;
-  const W = iso ? (2 * n - 2) * stepX + PW : n * PW, H = iso ? (2 * n - 2) * stepY + PH : n * PH;
+  const pos = lattice(S.preview === 'iso' && !s.glyph ? S.persp : 'grid', PW, PH, 3);
+  const W = Math.max(...pos.map(p => p[0])) + PW, H = Math.max(...pos.map(p => p[1])) + PH;
   const z = Math.max(1, Math.floor(Math.min(268 / W, 200 / H))), ox = Math.floor((268 - W * z) / 2), oy = Math.floor((200 - H * z) / 2);
-  for (let sum = 0; sum <= 2 * n - 2; sum++) for (let i = 0; i < n; i++) {
-    const j = sum - i;
-    if (j < 0 || j >= n) continue;
-    const x = iso ? (i - j + n - 1) * stepX : i * PW, y = iso ? (i + j) * stepY : j * PH;
-    paintRGBA(ctx, rgba, PW, PH, ox + x * z, oy + y * z, z, false);
-  }
+  for (const [x, y] of pos) paintRGBA(ctx, rgba, PW, PH, ox + x * z, oy + y * z, z, false);
   $('pvIso').classList.toggle('on', S.preview === 'iso'); $('pvGrid').classList.toggle('on', S.preview !== 'iso');
 }
 
 function drawHeader() {
   $('tabTiles').classList.toggle('on', S.tab === 'tiles'); $('tabChars').classList.toggle('on', S.tab === 'chars');
+  $('persp').value = S.persp;
   $('mHires').classList.toggle('on', S.mode === 'hires'); $('mMc').classList.toggle('on', S.mode === 'mc');
   $('mcSel').style.display = mcProject() ? '' : 'none';
   for (const id of ['bg', 'mc1', 'mc2']) $(id).value = S[id];
@@ -626,7 +649,7 @@ function drawHeader() {
   $('protectLbl').style.display = S.tab === 'tiles' ? '' : 'none';
   $('hint').innerHTML = S.tab === 'chars'
     ? `Editing glyph <b>${APEX.hex(sel)}</b> in place — every tile and map cell that uses it changes. Pick another glyph from the character set.`
-    : 'Left button draws, right button erases. Changed cells reuse identical glyphs or claim blank slots ($B6+), so shared glyphs stay intact.';
+    : `Left button draws, right button erases. Changed cells reuse identical glyphs or claim blank slots (${APEX.hex(freeFrom())}+), so shared glyphs stay intact.`;
 }
 
 function renderAll() {
@@ -646,6 +669,13 @@ function setMode(m) {
   S.mode = m; cur = 0; undoStack.length = redoStack.length = 0;
   loadMode(); save(); renderAll();
 }
+function setPersp(p) {
+  if (p === S.persp) return;
+  S.persp = p; cur = 0; sel = 0x40; undoStack.length = redoStack.length = 0;
+  loadMode(); save(); renderAll();
+}
+$('persp').innerHTML = Object.keys(APEX.PERSPECTIVES).map(p => `<option value="${p}">${APEX.PERSPECTIVES[p].name}</option>`).join('');
+$('persp').onchange = () => setPersp($('persp').value);
 $('mHires').onclick = () => setMode('hires');
 $('mMc').onclick = () => setMode('mc');
 $('cs').addEventListener('click', e => {
@@ -681,8 +711,8 @@ $('tDel').onclick = () => {
 $('resetAll').onclick = () => {
   if (!confirm(`Reset the ${S.mode === 'mc' ? 'multicolor' : 'hi-res'} character set and tiles to the defaults? This also resets the map editor's character set.`)) return;
   pushUndo();
-  chars = DEF[S.mode].glyphs.map(g => Uint8Array.from(g));
-  tiles = APEX.starterTiles(chars, S.mode); cur = 0; save(); renderAll();
+  chars = defs().glyphs.map(g => Uint8Array.from(g));
+  tiles = APEX.starterTiles(chars, S.mode, S.persp); cur = 0; save(); renderAll();
 };
 
 document.addEventListener('keydown', e => {
@@ -704,7 +734,7 @@ function download(name, data, type = 'application/octet-stream') {
   a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-const tag = () => mcProject() ? '-mc' : '';
+const tag = () => (S.persp === 'iso' ? '' : '-' + S.persp) + (mcProject() ? '-mc' : '');
 $('xBin').onclick = () => download(`apexscii${tag()}.bin`, APEX.flatten(chars));
 $('xPrg').onclick = () => download(`apexscii${tag()}-charset.prg`, APEX.charsetPrg(chars));
 $('xAsm').onclick = () => download(`apexscii${tag()}.asm`, APEX.charsetAsm(chars, chars.map((_, i) => glyphName(i))));
@@ -718,7 +748,7 @@ $('xPng').onclick = () => {
   c.toBlob(b => download(`apexscii${tag()}-tiles.png`, b));
 };
 $('xJson').onclick = () => download(`apexscii${tag()}-project.json`, JSON.stringify({
-  format: 'apexscii-art', version: 1, mode: S.mode, bg: S.bg, mc1: S.mc1, mc2: S.mc2, charset: toHex(chars), tiles,
+  format: 'apexscii-art', version: 1, persp: S.persp, mode: S.mode, bg: S.bg, mc1: S.mc1, mc2: S.mc2, charset: toHex(chars), tiles,
 }, null, 1), 'application/json');
 $('iJson').onclick = () => $('file').click();
 $('file').onchange = async () => {
@@ -727,7 +757,7 @@ $('file').onchange = async () => {
     const p = JSON.parse(await f.text());
     if (p.format !== 'apexscii-art' || !Array.isArray(p.tiles) || typeof p.charset !== 'string' || p.charset.length !== 4096) throw new Error('not an APEXSCII art project');
     pushUndo();
-    Object.assign(S, { mode: p.mode === 'mc' ? 'mc' : 'hires', bg: p.bg | 0, mc1: p.mc1 | 0, mc2: p.mc2 | 0 });
+    Object.assign(S, { persp: APEX.PERSPECTIVES[p.persp] ? p.persp : 'iso', mode: p.mode === 'mc' ? 'mc' : 'hires', bg: p.bg | 0, mc1: p.mc1 | 0, mc2: p.mc2 | 0 });
     chars = fromHex(p.charset); tiles = p.tiles; cur = 0;
     save(); renderAll();
   } catch (err) { toast('Could not open: ' + err.message); }

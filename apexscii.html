@@ -48,12 +48,13 @@
 <body>
 <header>
   <h1>APEXSCII</h1>
-  <span>isometric PETSCII-style character set for the Commodore 64 · hi-res 8×8 or multicolor 4×8 · 2:1 slopes</span>
+  <span>PETSCII-style character sets for the Commodore 64 · five perspectives · hi-res 8×8 or multicolor 4×8</span>
   <span style="flex:1"></span><a href="art.html" style="color:var(--dim)">Art tool →</a>
 </header>
 <main>
   <section>
-    <h2>Isometric map · live C64 screen</h2>
+    <h2 id="viewTitle">Map · live C64 screen</h2>
+    <div class="row" id="persps"></div>
     <div class="row">
       <span class="lbl">Mode</span><button id="mHires">Hi-res 8×8</button><button id="mMc">Multicolor 4×8</button>
       <span id="mcSel"><span class="lbl">MC1 $D022</span><select id="mc1"></select>
@@ -66,8 +67,9 @@
     <div id="status">Hover the screen to inspect cells. Click to apply the tool; shift-click lowers; alt-click opens the cell's glyph.</div>
     <div class="cols">
       <div>
-        <div class="lbl">Top-down grid (↘ = +x, ↙ = +y)</div>
+        <div class="lbl" id="miniLbl"></div>
         <div id="mini"></div>
+        <div class="row" id="moves" style="margin-top:6px"></div>
       </div>
       <div style="flex:1; min-width:220px">
         <div class="row"><span class="lbl">Status bar · 1–3 lines · {text} = reverse video</span></div>
@@ -136,33 +138,37 @@
 <script src="apexscii-core.js"></script>
 <script>
 'use strict';
-const DEF = { hires: APEX.buildDefault('hires'), mc: APEX.buildDefault('mc') };
-const CS_KEY = { hires: 'apexscii.charset', mc: 'apexscii.charset.mc' };
+// Each perspective has its own default charset per mode, built on first use.
+const DEF = {};
+const def = (persp, mode) => DEF[persp + mode] || (DEF[persp + mode] = APEX.buildDefault(mode, persp));
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } },
 };
 
-function loadCharset(mode) {
-  const s = store.get(CS_KEY[mode]);
+function loadCharset(persp, mode) {
+  const s = store.get(APEX.charsetKey(persp, mode));
   if (s && s.length === 4096) {
     const g = [];
     for (let i = 0; i < 256; i++) g.push(Uint8Array.from({ length: 8 }, (_, y) => parseInt(s.substr(i * 16 + y * 2, 2), 16)));
     return g;
   }
-  return DEF[mode].glyphs.map(g => Uint8Array.from(g));
+  return def(persp, mode).glyphs.map(g => Uint8Array.from(g));
 }
 function loadMap() {
   try {
     const m = JSON.parse(store.get('apexscii.map'));
-    if (m && m.cells && m.cells.length === 64) return Object.assign({ mode: 'hires', mc1: 12, mc2: 11, split: true }, m);
+    if (m && m.cells && m.cells.length === 64) {
+      return Object.assign({ mode: 'hires', mc1: 12, mc2: 11, split: true, persp: 'iso', dungeon: APEX.defaultDungeon() }, m);
+    }
   } catch (e) {}
   return APEX.defaultMap();
 }
 
-let map = loadMap(), base = loadCharset(map.mode);
-let D = DEF[map.mode], NAMES = D.names;
+let map = loadMap(), base = loadCharset(map.persp, map.mode);
+let D = def(map.persp, map.mode), NAMES = D.names;
 let tool = 'raise', mat = 0, obj = 0, view = 'base', sel = 0x40, clip = null, pen = 3;
+const isDungeon = () => map.persp === 'dungeon';
 let raster, comp, rom = loadRom();
 // The C64's own chargen ROM, if the user supplies it, gives an exact preview of the status bar.
 function loadRom() {
@@ -173,11 +179,13 @@ function loadRom() {
 const $ = id => document.getElementById(id);
 const PAL = APEX.PALETTE;
 // A glyph is drawn as 4x8 fat pixels when the map is multicolor and the slot holds MC data.
-const isMC = i => map.mode === 'mc' && (APEX.isMCSlot(i) || (view === 'comp' && !!comp && comp.allocated.includes(i)));
-const mcCols = () => [map.bg, map.mc1, map.mc2, APEX.MATERIALS[mat].mcColor];
+const isMC = i => map.mode === 'mc' && (APEX.isMCSlot(i, map.persp) || (view === 'comp' && !!comp && comp.allocated.includes(i)));
+const mcCols = () => [map.bg, map.mc1, map.mc2, APEX.MATERIALS[isDungeon() ? map.dungeon.mat : mat].mcColor];
 
 // ------------------------------------------------------------ controls
-const TOOLS = [['raise', 'Raise'], ['lower', 'Lower'], ['paint', 'Paint'], ['object', 'Object'], ['erase', 'Erase']];
+const HEIGHT_TOOLS = [['raise', 'Raise'], ['lower', 'Lower'], ['paint', 'Paint'], ['object', 'Object'], ['erase', 'Erase']];
+const MAZE_TOOLS = [['wall', 'Wall'], ['door', 'Door'], ['floor', 'Floor'], ['player', 'Player']];
+let TOOLS = HEIGHT_TOOLS;
 function buttons(container, items, isOn, onClick) {
   container.innerHTML = '';
   items.forEach((it, i) => {
@@ -189,13 +197,22 @@ function buttons(container, items, isOn, onClick) {
   });
 }
 function drawControls() {
+  const persps = Object.keys(APEX.PERSPECTIVES);
+  buttons($('persps'), persps.map(p => ({ html: APEX.PERSPECTIVES[p].name })), i => persps[i] === map.persp, i => setPersp(persps[i]));
+  TOOLS = isDungeon() ? MAZE_TOOLS : HEIGHT_TOOLS;
+  if (!TOOLS.some(t => t[0] === tool)) tool = TOOLS[0][0];
   buttons($('tools'), TOOLS.map(t => ({ html: t[1] })), i => TOOLS[i][0] === tool, i => { tool = TOOLS[i][0]; drawControls(); });
   const swatches = m => map.mode === 'mc'
     ? [m.mcColor, map.mc1, map.mc2].map(c => `<span class="sw" style="background:${PAL[c]}"></span>`).join('')
     : ['T', 'L', 'R'].map(f => `<span class="sw" style="background:${PAL[m.colors[f]]}"></span>`).join('');
-  buttons($('mats'), APEX.MATERIALS.map(m => ({ html: swatches(m) + ' ' + m.name })), i => i === mat,
-    i => { mat = i; if (tool !== 'paint' && tool !== 'raise') tool = 'paint'; drawControls(); drawCharset(); drawEditor(); });
+  // In the dungeon the material buttons set the whole maze's wall material.
+  buttons($('mats'), APEX.MATERIALS.map(m => ({ html: swatches(m) + ' ' + m.name })), i => i === (isDungeon() ? map.dungeon.mat : mat), i => {
+    if (isDungeon()) { map.dungeon.mat = i; rebuild(); return; }
+    mat = i; if (tool !== 'paint' && tool !== 'raise') tool = 'paint'; drawControls(); drawCharset(); drawEditor();
+  });
+  $('objs').style.display = isDungeon() ? 'none' : '';
   buttons($('objs'), APEX.OBJECTS.map(o => ({ html: '◆ ' + o.name })), i => i === obj, i => { obj = i; tool = 'object'; drawControls(); });
+  $('viewTitle').textContent = `${APEX.PERSPECTIVES[map.persp].name} map · live C64 screen`;
 }
 for (const id of ['bg', 'border', 'tcol', 'mc1', 'mc2']) {
   $(id).innerHTML = APEX.COLOR_NAMES.map((n, i) => `<option value="${i}">${i} ${n}</option>`).join('');
@@ -213,13 +230,39 @@ function applyTool(idx, shift) {
   rebuild();
 }
 
+// Dungeon: the mini grid edits the maze; the player moves with the buttons or arrow keys / WASD.
+function applyMaze(x, y) {
+  const d = map.dungeon, here = APEX.dungeonAt(d, x, y);
+  if (tool === 'player') { if (here !== '#') { d.x = x; d.y = y; } }
+  else if (!(x === d.x && y === d.y)) {
+    const ch = { wall: '#', door: 'D', floor: '.' }[tool];
+    d.rows[y] = d.rows[y].slice(0, x) + ch + d.rows[y].slice(x + 1);
+  }
+  rebuild();
+}
+function move(action) {
+  const d = map.dungeon;
+  if (action === 'left') d.dir = (d.dir + 3) % 4;
+  else if (action === 'right') d.dir = (d.dir + 1) % 4;
+  else {
+    const s = action === 'forward' ? 1 : -1, nx = d.x + APEX.DIRS[d.dir][0] * s, ny = d.y + APEX.DIRS[d.dir][1] * s;
+    if (APEX.dungeonAt(d, nx, ny) !== '#') { d.x = nx; d.y = ny; } // doors can be walked through
+  }
+  rebuild();
+}
+document.addEventListener('keydown', e => {
+  if (!isDungeon() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  const action = { ArrowUp: 'forward', w: 'forward', ArrowDown: 'back', s: 'back', ArrowLeft: 'left', a: 'left', ArrowRight: 'right', d: 'right' }[e.key];
+  if (action) { e.preventDefault(); move(action); }
+});
+
 // ------------------------------------------------------------ rendering
 function rebuild() {
   raster = APEX.renderScene(map);
   comp = APEX.composite(base, raster, map);
   drawControls(); drawScreen(); drawMini(); drawCharset(); drawEditor(); drawStats();
   store.set('apexscii.map', JSON.stringify(map));
-  store.set(CS_KEY[map.mode], base.map(g => Array.from(g, b => b.toString(16).padStart(2, '0')).join('')).join(''));
+  store.set(APEX.charsetKey(map.persp, map.mode), base.map(g => Array.from(g, b => b.toString(16).padStart(2, '0')).join('')).join(''));
 }
 
 const off = document.createElement('canvas'); off.width = 320; off.height = 200;
@@ -239,6 +282,31 @@ function drawScreen() {
 
 function drawMini() {
   const el = $('mini'); el.innerHTML = '';
+  $('moves').innerHTML = '';
+  if (isDungeon()) {
+    const d = map.dungeon, m = APEX.MATERIALS[d.mat];
+    $('miniLbl').textContent = `Maze · facing ${APEX.DIR_NAMES[d.dir]} at (${d.x},${d.y}) · arrow keys / WASD move`;
+    el.style.gridTemplateColumns = `repeat(${d.size}, 16px)`;
+    for (let y = 0; y < d.size; y++) for (let x = 0; x < d.size; x++) {
+      const b = document.createElement('button'), c = APEX.dungeonAt(d, x, y);
+      b.style.cssText = 'width:16px;height:16px;font-size:10px';
+      if (x === d.x && y === d.y) { b.textContent = '↑→↓←'[d.dir]; b.style.background = '#fff'; }
+      else if (c === '#') b.style.background = PAL[map.mode === 'mc' ? m.mcColor : m.colors.T];
+      else if (c === 'D') b.style.background = PAL[8];
+      else b.className = 'void';
+      b.onclick = () => applyMaze(x, y);
+      el.appendChild(b);
+    }
+    [['left', '↶ Turn'], ['forward', '↑ Forward'], ['back', '↓ Back'], ['right', 'Turn ↷']].forEach(([a, label]) => {
+      const b = document.createElement('button'); b.textContent = label; b.onclick = () => move(a); $('moves').appendChild(b);
+    });
+    return;
+  }
+  $('miniLbl').textContent = {
+    iso: 'Top-down grid (↘ = +x, ↙ = +y)', military: 'Top-down grid (↘ = +x, ↙ = +y)',
+    oblique: 'Top-down grid (north at the top)', side: 'Top-down grid (top row = far side)',
+  }[map.persp];
+  el.style.gridTemplateColumns = '';
   map.cells.forEach((c, i) => {
     const b = document.createElement('button');
     if (c.m < 0) { b.className = 'void'; b.textContent = '·'; }
@@ -269,11 +337,11 @@ function drawStats() {
 }
 
 const REGION_TINT = { text: '#2b2860', smooth: '#1f3a32', brick: '#3d2626', lines: '#2c3550', blocks: '#2c3550', free: '#1a1838' };
-const regionOf = i => APEX.REGIONS.find(r => i >= r.from && i <= r.to).name;
-$('legend').innerHTML = APEX.REGIONS.map(r =>
-  `<span><span class="sw" style="background:${REGION_TINT[r.name]};outline:1px solid #555"></span>${APEX.hex(r.from)}-${APEX.hex(r.to)} ${r.name}</span>`).join('');
+const regionOf = i => D.regions.find(r => i >= r.from && i <= r.to).name;
 
 function drawCharset() {
+  $('legend').innerHTML = D.regions.map(r =>
+    `<span><span class="sw" style="background:${REGION_TINT[r.name]};outline:1px solid #555"></span>${APEX.hex(r.from)}-${APEX.hex(r.to)} ${r.name}</span>`).join('');
   const ctx = $('cs').getContext('2d'), S = 27, set = view === 'comp' ? comp.chars : base;
   const alloc = new Set(view === 'comp' ? comp.allocated : []), cols = mcCols();
   ctx.fillStyle = '#0e0c22'; ctx.fillRect(0, 0, 434, 434);
@@ -419,14 +487,18 @@ $('resetCs').onclick = () => {
 };
 $('resetMap').onclick = () => {
   if (confirm('Reset the map to the demo scene?')) {
-    map = Object.assign(APEX.defaultMap(), { mode: map.mode, mc1: map.mc1, mc2: map.mc2 }); rebuild();
+    map = Object.assign(APEX.defaultMap(), { mode: map.mode, mc1: map.mc1, mc2: map.mc2, persp: map.persp }); rebuild();
   }
 };
-// Each mode keeps its own charset; switching swaps it in.
+// Each perspective and mode keeps its own charset; switching swaps it in.
+function useCharset() { D = def(map.persp, map.mode); NAMES = D.names; base = loadCharset(map.persp, map.mode); sel = 0x40; }
 function setMode(mode) {
   if (mode === map.mode) return;
-  map.mode = mode; D = DEF[mode]; NAMES = D.names; base = loadCharset(mode);
-  rebuild();
+  map.mode = mode; useCharset(); rebuild();
+}
+function setPersp(persp) {
+  if (persp === map.persp) return;
+  map.persp = persp; useCharset(); rebuild();
 }
 $('mHires').onclick = () => setMode('hires');
 $('mMc').onclick = () => setMode('mc');
@@ -464,7 +536,7 @@ function download(name, data) {
   a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-const tag = () => map.mode === 'mc' ? '-mc' : '';
+const tag = () => (map.persp === 'iso' ? '' : '-' + map.persp) + (map.mode === 'mc' ? '-mc' : '');
 $('xDemo').onclick = () => download(`apexscii${tag()}-map.prg`, APEX.mapPrg(comp.chars, comp.screen, comp.color, map));
 $('xMapAsm').onclick = () => download(`apexscii${tag()}-map.asm`,
   APEX.charsetAsm(comp.chars, comp.chars.map((_, i) => comp.allocated.includes(i) ? 'map composite' : NAMES[i])) + '\n' + APEX.mapAsm(comp.screen, comp.color));
@@ -474,7 +546,7 @@ $('xAsm').onclick = () => download(`apexscii${tag()}.asm`, APEX.charsetAsm(base,
 
 // The art tool writes the same charset key; pick up its changes live.
 window.addEventListener('storage', e => {
-  if (e.key === CS_KEY[map.mode] && e.newValue) { base = loadCharset(map.mode); rebuild(); }
+  if (e.key === APEX.charsetKey(map.persp, map.mode) && e.newValue) { base = loadCharset(map.persp, map.mode); rebuild(); }
 });
 
 rebuild();

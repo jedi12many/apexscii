@@ -140,7 +140,42 @@
       R: (fx, y) => brickWallMC(fx, y) ? (((fx + y) & 1) ? 3 : 2) : 0,      // shaded bricks, dark mortar
     },
   };
+  // Dungeon faces: ceiling, ground, front wall, side wall, door (vertical planks).
+  Object.assign(SETS.smooth, { C: () => false, G: SETS.smooth.R, W: SETS.smooth.T, S: SETS.smooth.L, D: x => (x & 3) !== 3 });
+  Object.assign(SETS.brick, { C: () => false, G: SETS.brick.T, W: SETS.brick.L, S: SETS.brick.R, D: x => (x & 3) !== 3 });
+  Object.assign(MC_SETS.smooth, { C: () => 0, G: () => 2, W: () => 3, S: () => 1, D: fx => (fx & 1) ? 2 : 3 });
+  Object.assign(MC_SETS.brick, { C: () => 0, G: MC_SETS.brick.T, W: MC_SETS.brick.L, S: MC_SETS.brick.R, D: fx => (fx & 1) ? 2 : 3 });
   const FACE_NAMES = { E: 'empty', T: 'top', L: 'left', R: 'right' };
+
+  // 45° boundaries, corner to corner across a cell: military, side oblique and dungeon views.
+  const B45 = [
+    { id: '/', name: '/ 45°', row: x => 7 - x },
+    { id: '\\', name: '\\ 45°', row: x => x },
+  ];
+
+  // Every perspective shares the text block at $00-$3F, then its own shade sets.
+  //   faces: what the pair glyphs combine; key: which pattern each face uses; solids: plain faces.
+  // The top-down 3/4 view has no slopes at all, so it carries outline variants instead.
+  const PERSPECTIVES = {
+    iso: { name: 'Isometric 2:1' },
+    military: {
+      name: 'Military 45°', faces: ['E', 'T', 'L', 'R'], solids: ['T', 'L', 'R'], bounds: B45,
+      key: { E: 'E', T: 'T', L: 'L', R: 'R' }, faceNames: FACE_NAMES,
+    },
+    oblique: {
+      name: 'Top-down 3/4', faces: [], solids: [], bounds: [], edges: true,
+      key: { T: 'T', F: 'L' }, faceNames: { T: 'top', F: 'front' },
+    },
+    side: {
+      name: 'Side oblique', faces: ['E', 'T', 'F', 'R'], solids: ['T', 'F', 'R'], bounds: [B45[0]],
+      key: { E: 'E', T: 'T', F: 'L', R: 'R' }, faceNames: { E: 'empty', T: 'top', F: 'front', R: 'side' },
+    },
+    dungeon: {
+      name: 'First-person dungeon', faces: ['C', 'G', 'W', 'S'], solids: ['C', 'G', 'W', 'S', 'D'], bounds: B45,
+      key: { C: 'C', G: 'G', W: 'W', S: 'S', D: 'D' },
+      faceNames: { C: 'ceiling', G: 'floor', W: 'front wall', S: 'side wall', D: 'door' },
+    },
+  };
 
   // The four 2:1 slope boundaries; row(x) is the first row of the "below" region.
   const BOUNDS = [
@@ -176,9 +211,73 @@
 
   // In multicolor mode the shade sets and free slots are fat-pixel glyphs; text, lines and
   // blocks stay hi-res (they are shown with colour RAM 0-7, which keeps a cell hi-res).
-  const isMCSlot = i => i >= 0x40 && !(i >= 0xa6 && i <= 0xb5);
+  const LAYOUTS = {};
+  const layout = persp => LAYOUTS[persp] || (LAYOUTS[persp] = buildDefault('hires', persp).regions);
+  function isMCSlot(i, persp = 'iso') {
+    const r = layout(persp).find(r => i >= r.from && i <= r.to);
+    return !['text', 'lines', 'blocks'].includes(r.name);
+  }
 
-  function buildDefault(mode = 'hires') {
+  // Browser storage key for a perspective's charset; the isometric keys predate perspectives.
+  const charsetKey = (persp, mode) => (persp === 'iso' ? 'apexscii.charset' : `apexscii.${persp}.charset`) + (mode === 'mc' ? '.mc' : '');
+
+  function buildDefault(mode = 'hires', persp = 'iso') {
+    return persp === 'iso' ? buildIso(mode) : buildPerspective(mode, persp);
+  }
+
+  const EDGE_BLOCK_GLYPHS = [
+    ['left edge', (x) => x === 0], ['right edge', (x) => x === 7],
+    ['top edge', (x, y) => y === 0], ['bottom edge', (x, y) => y === 7],
+    ['upper half', (x, y) => y < 4], ['lower half', (x, y) => y >= 4],
+    ['left half', (x) => x < 4], ['right half', (x) => x >= 4],
+    ['quad TL', (x, y) => x < 4 && y < 4], ['quad TR', (x, y) => x >= 4 && y < 4],
+    ['quad BL', (x, y) => x < 4 && y >= 4], ['quad BR', (x, y) => x >= 4 && y >= 4],
+  ];
+
+  function buildPerspective(mode, persp) {
+    const P = PERSPECTIVES[persp], mc = mode === 'mc';
+    const glyphs = [], names = [], regions = [];
+    for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
+    let i = 0, start = 0;
+    const add = (g, name) => { glyphs[i] = g; names[i++] = name; };
+    const region = name => { regions.push({ from: start, to: i - 1, name }); start = i; };
+    FONT_SRC.forEach((src, k) => add(parseGlyph(src), 'text ' + (TEXT_NAMES[k] === ' ' ? 'space' : TEXT_NAMES[k])));
+    region('text');
+    const pairs = [];
+    for (const a of P.faces) for (const b of P.faces) if (a !== b) pairs.push([a, b]);
+    for (const setName of ['smooth', 'brick']) {
+      const pat = f => (mc ? MC_SETS : SETS)[setName][P.key[f]], make = mc ? glyphFromMC : glyphFrom;
+      const row = mc ? (b, fx) => b.row(fx * 2) : (b, x) => b.row(x);
+      const label = (mc ? 'mc ' : '') + setName, fn = P.faceNames;
+      for (const f of P.solids) add(make(pat(f)), `${label} · ${fn[f]} face`);
+      for (const b of P.bounds) for (const [a, c] of pairs) {
+        add(make((x, y) => (y < row(b, x) ? pat(a) : pat(c))(x, y)), `${label} · ${b.name} · ${fn[a]} over ${fn[c]}`);
+      }
+      if (P.edges) {
+        // Outlines where a block drops away: top faces with any of N/E/S/W, front faces with W/E.
+        const maxX = mc ? 3 : 7, off = mc ? 0 : false;
+        for (let e = 0; e < 16; e++) {
+          const on = [e & 1 && 'N', e & 2 && 'E', e & 4 && 'S', e & 8 && 'W'].filter(Boolean);
+          add(make((x, y) => ((e & 1) && y === 0) || ((e & 4) && y === 7) || ((e & 8) && x === 0) || ((e & 2) && x === maxX)
+            ? off : pat('T')(x, y)), `${label} · top · ${on.length ? 'edges ' + on.join('') : 'no edges'}`);
+        }
+        for (let e = 0; e < 4; e++) {
+          add(make((x, y) => ((e & 1) && x === 0) || ((e & 2) && x === maxX) ? off : pat('F')(x, y)),
+            `${label} · front · ${['no edges', 'edge W', 'edge E', 'edges WE'][e]}`);
+        }
+      }
+      region(setName);
+    }
+    for (const b of P.bounds) add(glyphFrom((x, y) => y === b.row(x)), `line · ${b.name}`);
+    EDGE_BLOCK_GLYPHS.slice(0, 4).forEach(([n, fn]) => add(glyphFrom(fn), 'line · ' + n));
+    region('lines');
+    EDGE_BLOCK_GLYPHS.slice(4).forEach(([n, fn]) => add(glyphFrom(fn), 'block · ' + n));
+    region('blocks');
+    i = 256; region('free');
+    return { glyphs, names, regions };
+  }
+
+  function buildIso(mode) {
     const mc = mode === 'mc';
     const glyphs = [], names = [];
     for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
@@ -215,7 +314,7 @@
       names[i++] = (k < 4 ? 'line · ' : 'block · ') + n;
     });
     if (i !== 0xb6) throw new Error('layout drift: ended at ' + i.toString(16));
-    return { glyphs, names };
+    return { glyphs, names, regions: REGIONS };
   }
 
   // ------------------------------------------------------------- materials
@@ -281,7 +380,7 @@
       cells.push({ m: M[t[0]], h: +t[1], o: t[2] ? O[t[2]] : -1 });
     }
     return { size: N, cells, caption: '{ APEXSCII } ISOMETRIC PETSCII', bg: 0, border: 0, textColor: 7, split: true,
-             mode: 'hires', mc1: 12, mc2: 11 };
+             mode: 'hires', mc1: 12, mc2: 11, persp: 'iso', dungeon: defaultDungeon() };
   }
 
   // Draw one iso block with its 32x32 box at (sx, sy) through plot(x, y, value, colour, isObj).
@@ -323,6 +422,164 @@
     });
   }
 
+  // ------------------------------------------------- the other perspectives
+  // Plot one pixel of a face, using the perspective's pattern for it and the material's colour.
+  const FACE_COLOR = { T: 'T', L: 'L', F: 'L', R: 'R', W: 'T', S: 'L', G: 'R' };
+  function facePixel(plot, x, y, mat, persp, face, mc) {
+    const key = PERSPECTIVES[persp].key[face];
+    if (mc) plot(x, y, MC_SETS[mat.set][key](x >> 1, y), mat.mcColor, false);
+    else plot(x, y, SETS[mat.set][key](x, y), face === 'D' ? 8 : face === 'C' ? 0 : mat.colors[FACE_COLOR[face]], false);
+  }
+
+  // Military: a 16x16 diamond (2x2 chars) with 45° edges, and `side` pixels of wall below it.
+  function drawMilitaryBlock(plot, sx, sy, mat, mc, side) {
+    for (let px = 0; px < 16; px++) {
+      const l = px < 8 ? px : 15 - px, top = 7 - l, bot = 8 + l;
+      for (let py = top; py < bot + side; py++)
+        facePixel(plot, sx + px, sy + py, mat, 'military', py < bot ? 'T' : px < 8 ? 'L' : 'R', mc);
+    }
+  }
+
+  // Top-down 3/4: a 16x16 top with outlines where a neighbour is lower, then 8px of front face
+  // per height unit. `nb` holds the N/E/S/W neighbour heights (-1 for nothing there).
+  function drawObliqueBlock(plot, sx, top, mat, mc, h, nb) {
+    const atW = px => mc ? px <= 1 : px === 0, atE = px => mc ? px >= 14 : px === 15; // whole fat pixels in MC
+    for (let py = 0; py < 16; py++) for (let px = 0; px < 16; px++) {
+      const edge = (py === 0 && nb.N < h) || (py === 15 && nb.S < h) || (atW(px) && nb.W < h) || (atE(px) && nb.E < h);
+      if (edge) plot(sx + px, top + py, 0, -1, false);
+      else facePixel(plot, sx + px, top + py, mat, 'oblique', 'T', mc);
+    }
+    for (let z = 0; z < h; z++) {
+      const y0 = top + 16 + (h - 1 - z) * 8;
+      for (let py = 0; py < 8; py++) for (let px = 0; px < 16; px++) {
+        if ((atW(px) && nb.W <= z) || (atE(px) && nb.E <= z)) plot(sx + px, y0 + py, 0, -1, false);
+        else facePixel(plot, sx + px, y0 + py, mat, 'oblique', 'F', mc);
+      }
+    }
+  }
+
+  // Side oblique (cabinet): 16x16 front face, top face receding up-right by 8px at 45°,
+  // and an 8px side face on the right. `full` false draws only the top (a block at ground level).
+  function drawSideBlock(plot, sx, sy, mat, mc, full) {
+    for (let r = 0; r < 8; r++) for (let x = 7 - r; x < 23 - r; x++) facePixel(plot, sx + x, sy - 8 + r, mat, 'side', 'T', mc);
+    if (!full) return;
+    for (let py = 0; py < 16; py++) for (let px = 0; px < 16; px++) facePixel(plot, sx + px, sy + py, mat, 'side', 'F', mc);
+    for (let c = 0; c < 8; c++) for (let y = sy - 1 - c; y <= sy + 14 - c; y++) facePixel(plot, sx + 16 + c, y, mat, 'side', 'R', mc);
+  }
+
+  // The height-map views all read the same map, so one world can be seen from any of them.
+  const VIEW_RENDERERS = {
+    military(map, plot, mc, setIdx) {
+      const n = map.size;
+      for (let s = 0; s <= 2 * n - 2; s++) for (let gx = Math.max(0, s - n + 1); gx <= Math.min(s, n - 1); gx++) {
+        const gy = s - gx, c = map.cells[gy * n + gx];
+        if (c.m < 0) continue;
+        setIdx(gy * n + gx);
+        const sx = 152 + (gx - gy) * 8, top = 48 + (gx + gy) * 8 - c.h * 8;
+        drawMilitaryBlock(plot, sx, top, MATERIALS[c.m], mc, c.h * 8);
+        if (c.o >= 0) drawObject(plot, OBJECTS[c.o], sx, top - 14, mc);
+      }
+    },
+    oblique(map, plot, mc, setIdx) {
+      const n = map.size, hAt = (x, y) => {
+        const c = x >= 0 && y >= 0 && x < n && y < n ? map.cells[y * n + x] : null;
+        return c && c.m >= 0 ? c.h : -1;
+      };
+      for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++) {
+        const c = map.cells[gy * n + gx];
+        if (c.m < 0) continue;
+        setIdx(gy * n + gx);
+        const sx = 96 + gx * 16, top = 48 + gy * 16 - c.h * 8;
+        drawObliqueBlock(plot, sx, top, MATERIALS[c.m], mc, c.h,
+          { N: hAt(gx, gy - 1), E: hAt(gx + 1, gy), S: hAt(gx, gy + 1), W: hAt(gx - 1, gy) });
+        if (c.o >= 0) drawObject(plot, OBJECTS[c.o], sx, top - 10, mc);
+      }
+    },
+    side(map, plot, mc, setIdx) {
+      const n = map.size;
+      for (let gz = n - 1; gz >= 0; gz--) for (let gx = 0; gx < n; gx++) {
+        const gy = n - 1 - gz, c = map.cells[gy * n + gx]; // map row 0 is the far side
+        if (c.m < 0) continue;
+        setIdx(gy * n + gx);
+        const mat = MATERIALS[c.m], sx = 64 + gx * 16 + gz * 8, ground = 176 - gz * 8;
+        if (c.h === 0) drawSideBlock(plot, sx, ground, mat, mc, false);
+        else for (let z = 0; z < c.h; z++) drawSideBlock(plot, sx, ground - 16 - z * 16, mat, mc, true);
+        if (c.o >= 0) drawObject(plot, OBJECTS[c.o], sx + 4, ground - 16 * c.h - 24, mc);
+      }
+    },
+  };
+
+  // ------------------------------------------------------------------ dungeon
+  const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // N E S W
+  const DIR_NAMES = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
+  // Wall boxes (half width, half height) at each distance; equal steps on both axes keep every
+  // perspective edge at exactly 45°, and every corner on a char boundary.
+  const DUNGEON_BOXES = [[80, 64], [56, 40], [40, 24], [32, 16]];
+  const ARROW = ['...##...', '..####..', '.######.', '########', '...##...', '...##...', '...##...', '........'];
+
+  function defaultDungeon() {
+    return {
+      size: 16, mat: 1, x: 8, y: 8, dir: 0,
+      rows: [
+        '################', '#..............#', '#.####.#####.#.#', '#.#....#...#.#.#',
+        '#.#.####.#.#.#.#', '#.#......#...#.#', '#.######D#####.#', '#......#.......#',
+        '######.#.#####.#', '#......#.#...#.#', '#.######.#.#.#.#', '#.#......#.#...#',
+        '#.#.######.###.#', '#.#........#...#', '#...######...#.#', '################',
+      ],
+    };
+  }
+  const dungeonAt = (d, x, y) => x < 0 || y < 0 || x >= d.size || y >= d.size ? '#' : d.rows[y][x];
+
+  // First-person view (160x128 at vx,vy), drawn far to near, plus an optional minimap to the right.
+  function renderDungeon(d, plot, mc, vx, vy, withMap) {
+    const mat = MATERIALS[d.mat], cx = vx + 80, cy = vy + 64;
+    const f = DIRS[d.dir], l = DIRS[(d.dir + 3) % 4], r = DIRS[(d.dir + 1) % 4];
+    const px = (x, y, face) => facePixel(plot, x, y, mat, 'dungeon', face, mc);
+    const rect = (x0, y0, x1, y1, face) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) px(x, y, face); };
+    for (let y = vy; y < vy + 128; y++) for (let x = vx; x < vx + 160; x++) px(x, y, y < cy ? 'C' : 'G');
+    const cell = (dist, side) => dungeonAt(d, d.x + f[0] * dist + side[0], d.y + f[1] * dist + side[1]);
+    const solid = c => c !== '.';
+    for (let dist = 2; dist >= 0; dist--) {
+      const [hw0, hh0] = DUNGEON_BOXES[dist], [hw1, hh1] = DUNGEON_BOXES[dist + 1], span = hw0 - hw1;
+      for (const [side, sign] of [[l, -1], [r, 1]]) {
+        if (solid(cell(dist, side))) {
+          for (let k = 0; k < span; k++) { // wall slice k pixels in from the outer edge
+            const x = sign < 0 ? cx - hw0 + k : cx + hw0 - 1 - k;
+            for (let y = cy - hh0 + k; y <= cy + hh0 - 2 - k; y++) px(x, y, 'S');
+          }
+        } else if (solid(cell(dist + 1, side))) { // an opening shows the far corridor's wall face-on
+          const x0 = sign < 0 ? cx - hw0 : cx + hw1;
+          rect(x0, cy - hh1, x0 + span, cy + hh1, 'W');
+        }
+      }
+      const ahead = cell(dist + 1, [0, 0]);
+      if (solid(ahead)) {
+        rect(cx - hw1, cy - hh1, cx + hw1, cy + hh1, 'W');
+        if (ahead === 'D') {
+          const dw = Math.round(hw1 / 2 / 8) * 8, dh = Math.round(hh1 * 1.5 / 8) * 8;
+          rect(cx - dw, cy + hh1 - dh, cx + dw, cy + hh1, 'D');
+        }
+      }
+    }
+    if (!withMap) return;
+    const mx = vx + 176, my = vy;
+    for (let y = 0; y < d.size; y++) for (let x = 0; x < d.size; x++) {
+      const c = dungeonAt(d, x, y);
+      if (c === '.') continue;
+      for (let py = 0; py < 8; py++) for (let qx = 0; qx < 8; qx++) {
+        const X = mx + x * 8 + qx, Y = my + y * 8 + py;
+        if (mc) plot(X, Y, c === 'D' ? 2 : 3, mat.mcColor, false);
+        else plot(X, Y, 1, c === 'D' ? 8 : mat.colors.T, false);
+      }
+    }
+    for (let py = 0; py < 8; py++) for (let qx = 0; qx < 8; qx++) { // player arrow, rotated to face
+      let ax = qx, ay = py;
+      for (let k = 0; k < d.dir; k++) [ax, ay] = [ay, 7 - ax];
+      const on = ARROW[ay][ax] === '#';
+      plot(mx + d.x * 8 + qx, my + d.y * 8 + py, on ? 1 : 0, on ? 1 : -1, on); // white (hi-res) or MC1
+    }
+  }
+
   // Rasterise the map into 320x200 pixel values + per-pixel colour + column owner.
   // Hi-res: ink holds 0/1. Multicolor: ink holds the 2-bit value, duplicated across each pixel pair.
   function renderScene(map) {
@@ -334,6 +591,12 @@
       if (x < 0 || y < 0 || x >= W || y >= mapBottom) return; // status rows stay clear
       const i = y * W + x;
       ink[i] = +v; if (c >= 0) col[i] = c; own[i] = idx; obj[i] = isObj ? 1 : 0;
+    }
+    const persp = map.persp || 'iso';
+    if (persp !== 'iso') {
+      if (persp === 'dungeon') renderDungeon(map.dungeon, plot, mc, 8, 8, true);
+      else VIEW_RENDERERS[persp](map, plot, mc, i => { idx = i; });
+      return { ink, col, own, obj };
     }
     for (let s = 0; s <= 2 * n - 2; s++) {
       for (let gx = Math.max(0, s - n + 1); gx <= Math.min(s, n - 1); gx++) {
@@ -458,7 +721,7 @@
   // ----------------------------------------------------------------- tiles
   // A tile is a w x h block of cells, each { c: screen code, k: colour RAM value }.
   // Starter tiles are drawn with the map renderer's own block/object code, so they match it exactly.
-  function starterTiles(chars, mode) {
+  function starterTiles(chars, mode, persp = 'iso') {
     const mc = mode === 'mc', alloc = makeAllocator(chars);
     const make = (name, w, h, draw) => {
       const stride = w * 8, n = stride * h * 8;
@@ -477,6 +740,27 @@
       return { name, w, h, cells };
     };
     const mat = name => MATERIALS.find(m => m.name === name);
+    const objects = () => OBJECTS.map(ob => make(ob.name, 2, 3, p => drawObject(p, ob, 0, 0, mc)));
+    const blocks = (w, h, draw) => ['Grass', 'Stone', 'Brick'].map(m => make(`${m} block`, w, h, p => draw(p, mat(m))));
+    const none = { N: -1, E: -1, S: -1, W: -1 };
+    const view = (name, rows) => make(name, 20, 16, p => renderDungeon({ size: rows.length, mat: 1, x: 2, y: rows.length - 1, dir: 0, rows }, p, mc, 0, 0, false));
+    if (persp === 'military') return [
+      make('Grass floor', 2, 2, p => drawMilitaryBlock(p, 0, 0, mat('Grass'), mc, 0)),
+      ...blocks(2, 3, (p, m) => drawMilitaryBlock(p, 0, 0, m, mc, 8)), ...objects(),
+    ];
+    if (persp === 'oblique') return [
+      make('Grass floor', 2, 2, p => drawObliqueBlock(p, 0, 0, mat('Grass'), mc, 0, none)),
+      ...blocks(2, 3, (p, m) => drawObliqueBlock(p, 0, 0, m, mc, 1, none)), ...objects(),
+    ];
+    if (persp === 'side') return [
+      make('Grass ground', 3, 1, p => drawSideBlock(p, 0, 8, mat('Grass'), mc, false)),
+      ...blocks(3, 3, (p, m) => drawSideBlock(p, 0, 8, m, mc, true)), ...objects(),
+    ];
+    if (persp === 'dungeon') return [
+      view('Corridor', ['#####', '##.##', '##.##', '##.##', '##.##']),
+      view('Door ahead', ['#####', '#####', '##D##', '##.##', '##.##']),
+      view('Junction', ['#####', '##.##', '#...#', '##.##', '##.##']),
+    ];
     return [
       make('Grass floor', 4, 2, p => drawBlock(p, 0, 0, mat('Grass'), mc, false)),
       make('Water floor', 4, 2, p => drawBlock(p, 0, 0, mat('Water'), mc, false)),
@@ -642,6 +926,6 @@
 
   return {
     W, H, MAX_H, PALETTE, COLOR_NAMES, MATERIALS, OBJECTS, REGIONS, SETS, MC_SETS, BOUNDS, PAIRS,
-    isMCSlot, screenRGB, statusRows, starterTiles, tilesAsm, buildDefault, defaultMap, renderScene, composite, flatten, charsetPrg, mapPrg, charsetAsm, mapAsm, hex,
+    isMCSlot, screenRGB, statusRows, starterTiles, tilesAsm, buildDefault, layout, charsetKey, PERSPECTIVES, DIRS, DIR_NAMES, dungeonAt, defaultDungeon, defaultMap, renderScene, composite, flatten, charsetPrg, mapPrg, charsetAsm, mapAsm, hex,
   };
 });
