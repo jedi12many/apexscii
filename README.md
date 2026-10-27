@@ -108,3 +108,7 @@ node test/vice-check.js "C:\path\to\GTK3VICE-3.10-win64"
 ```
 
 Options: `--ntsc` runs on an NTSC machine, and `--cycles 12000000,15000017` takes a screenshot at each listed cycle count, so you can check that the raster split is stable across frames. The script prints one line per screen and ends with PASS or FAIL; it exits with 1 on any failure. Screenshots go to a temporary folder that is deleted afterwards.
+
+## Licence
+
+MIT, copyright (c) 2026 jedi12many; see [LICENSE](LICENSE). The character sets, generated files and tools may be used in any project, including commercial games, as long as the copyright notice is kept. The C64 ROM font is never included: the text glyphs are redrawn, and ROM-font previews read the `chargen` file from your own VICE install.
