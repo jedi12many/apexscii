@@ -222,6 +222,18 @@
     L: MC_SETS.brick.L, R: MC_SETS.brick.R, C: BEAMS_MC, D: PLANK_DOOR_MC,
   });
 
+  // Animated textures: frames of a top-face texture, for a renderer to cycle through. They aren't in
+  // any theme's layout; on the C64 the few glyphs they produce are rewritten each frame. Water ripples
+  // drift right by one fat pixel per frame (four frames loop); its sides are the smooth ones.
+  const ANIMATIONS = { water: [] };
+  for (let f = 0; f < 4; f++) {
+    const crest = (x, y) => (y & 3) === 1 && ((x + 2 * f + ((y >> 2) & 1) * 4) & 7) < 3;
+    const crestMC = (fx, y) => (y & 3) === 1 && ((fx + f + ((y >> 2) & 1) * 2) & 3) < 2;
+    defineSet(`water-${f}`, { T: (x, y) => !crest(x, y), L: SETS.smooth.L, R: SETS.smooth.R },
+      { T: (fx, y) => (crestMC(fx, y) ? 1 : 3), L: MC_SETS.smooth.L, R: MC_SETS.smooth.R });
+    ANIMATIONS.water.push(`water-${f}`);
+  }
+
   // Each theme names the pattern sets that fill the two shade-set regions of every perspective.
   const THEMES = {
     classic: { name: 'Classic', sets: ['smooth', 'brick'] },
@@ -303,9 +315,10 @@
   }
 
   // theme picks the textures (see THEMES); the layout and glyph roles are the same for every theme.
-  function buildDefault(mode = 'hires', persp = 'iso', theme = 'classic') {
-    const sets = THEMES[theme].sets;
-    return persp === 'iso' ? buildIso(mode, sets) : buildPerspective(mode, persp, sets);
+  // style.outline draws a dark seam where two different faces meet (see pairFn).
+  function buildDefault(mode = 'hires', persp = 'iso', theme = 'classic', style = {}) {
+    const sets = THEMES[theme].sets, outline = !!style.outline;
+    return persp === 'iso' ? buildIso(mode, sets, outline) : buildPerspective(mode, persp, sets, outline);
   }
 
   const EDGE_BLOCK_GLYPHS = [
@@ -317,7 +330,15 @@
     ['quad BL', (x, y) => x < 4 && y >= 4], ['quad BR', (x, y) => x >= 4 && y >= 4],
   ];
 
-  function buildPerspective(mode, persp, sets) {
+  // A pair glyph: face pa above the boundary, pc below it. With a seam, the first row of the lower face
+  // is left dark (0 in either mode) — except in a cell's top row, so renderers can apply the same rule
+  // to every pixel without knowing where boundaries fall.
+  const pairFn = (row, b, pa, pc, seam) => (x, y) => {
+    const r = row(b, x);
+    return seam && y === r && y > 0 ? 0 : (y < r ? pa : pc)(x, y);
+  };
+
+  function buildPerspective(mode, persp, sets, outline) {
     const P = PERSPECTIVES[persp], mc = mode === 'mc';
     const glyphs = [], names = [], regions = [];
     for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
@@ -331,10 +352,10 @@
     for (const setName of sets) {
       const pat = f => (mc ? MC_SETS : SETS)[setName][P.key[f]], make = mc ? glyphFromMC : glyphFrom;
       const row = mc ? (b, fx) => b.row(fx * 2) : (b, x) => b.row(x);
-      const label = (mc ? 'mc ' : '') + setName, fn = P.faceNames;
+      const label = (mc ? 'mc ' : '') + (outline ? 'outlined ' : '') + setName, fn = P.faceNames;
       for (const f of P.solids) add(make(pat(f)), `${label} · ${fn[f]} face`);
       for (const b of P.bounds) for (const [a, c] of pairs) {
-        add(make((x, y) => (y < row(b, x) ? pat(a) : pat(c))(x, y)), `${label} · ${b.name} · ${fn[a]} over ${fn[c]}`);
+        add(make(pairFn(row, b, pat(a), pat(c), outline && a !== 'E' && c !== 'E')), `${label} · ${b.name} · ${fn[a]} over ${fn[c]}`);
       }
       if (P.edges) {
         // Outlines where a block drops away: top faces with any of N/E/S/W, front faces with W/E.
@@ -360,7 +381,7 @@
     return { glyphs, names, regions };
   }
 
-  function buildIso(mode, sets) {
+  function buildIso(mode, sets, outline) {
     const mc = mode === 'mc';
     const glyphs = [], names = [];
     for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
@@ -372,13 +393,13 @@
     for (const setName of sets) {
       const set = (mc ? MC_SETS : SETS)[setName], make = mc ? glyphFromMC : glyphFrom;
       const row = mc ? (b, fx) => b.row(fx * 2) : (b, x) => b.row(x);
-      const label = (mc ? 'mc ' : '') + setName;
+      const label = (mc ? 'mc ' : '') + (outline ? 'outlined ' : '') + setName;
       for (const f of ['T', 'L', 'R']) {
         glyphs[i] = make(set[f]);
         names[i++] = `${label} · ${FACE_NAMES[f]} face`;
       }
       for (const b of BOUNDS) for (const [a, c] of PAIRS) {
-        glyphs[i] = make((x, y) => (y < row(b, x) ? set[a] : set[c])(x, y));
+        glyphs[i] = make(pairFn(row, b, set[a], set[c], outline && a !== 'E' && c !== 'E'));
         names[i++] = `${label} · ${b.name} · ${FACE_NAMES[a]} over ${FACE_NAMES[c]}`;
       }
     }
@@ -559,8 +580,8 @@
   // A specimen sheet shows a whole set on the C64: the 256 glyphs as a 16x16 grid with hex labels
   // (columns spaced for legibility), the layout regions underneath, and a status row in the ROM
   // font, so the raster split is exercised too. Text stays below colour 8, so it is hi-res in MC.
-  function specimen(persp = 'iso', mode = 'hires', theme = 'classic') {
-    const { glyphs, regions } = buildDefault(mode, persp, theme), mc = mode === 'mc';
+  function specimen(persp = 'iso', mode = 'hires', theme = 'classic', style = {}) {
+    const { glyphs, regions } = buildDefault(mode, persp, theme, style), mc = mode === 'mc';
     const ink = mc ? { title: 7, sub: 1, label: 3, legend: 1 } : { title: 7, sub: 15, label: 12, legend: 15 };
     const screen = new Uint8Array(1000).fill(0x20), color = new Uint8Array(1000).fill(1);
     const text = (row, col, s, c, rev) => {
@@ -572,7 +593,8 @@
     const centre = (row, s, c, rev) => text(row, (40 - s.length) >> 1, s, c, rev);
     const HEX = '0123456789ABCDEF';
     centre(0, 'APEXSCII ' + PERSPECTIVES[persp].name.toUpperCase().replace('°', ''), ink.title);
-    centre(1, (theme === 'classic' ? '' : THEMES[theme].name.toUpperCase() + '  ') + (mc ? 'MULTICOLOR 4X8' : 'HI-RES 8X8'), ink.sub);
+    centre(1, (theme === 'classic' ? '' : THEMES[theme].name.toUpperCase() + '  ') + (style.outline ? 'OUTLINED  ' : '') +
+      (mc ? 'MULTICOLOR 4X8' : 'HI-RES 8X8'), ink.sub);
     for (let k = 0; k < 16; k++) text(3, 7 + 2 * k, HEX[k], ink.label);
     for (let r = 0; r < 16; r++) {
       text(4 + r, 3, HEX[r] + '0', ink.label);
@@ -597,10 +619,10 @@
     text(24, start + tag.length, rest, 7);
     return { chars: glyphs, screen, color, opts: { mode, bg: 0, border: 0, mc1: 12, mc2: 11, romRows: 1 } };
   }
-  const specimenPrg = (persp, mode, theme) => { const s = specimen(persp, mode, theme); return screenPrg(s.chars, s.screen, s.color, s.opts); };
+  const specimenPrg = (persp, mode, theme, style) => { const s = specimen(persp, mode, theme, style); return screenPrg(s.chars, s.screen, s.color, s.opts); };
 
   return {
-    W, H, PALETTE, COLOR_NAMES, REGIONS, PERSPECTIVES, THEMES, SETS, MC_SETS, BOUNDS, B45, PAIRS, FACE_NAMES,
+    W, H, PALETTE, COLOR_NAMES, REGIONS, PERSPECTIVES, THEMES, ANIMATIONS, SETS, MC_SETS, BOUNDS, B45, PAIRS, FACE_NAMES,
     glyphFrom, glyphFromMC, buildDefault, layout, isMCSlot, asciiToScreen,
     screenRGB, screenPrg, screenAsm, flatten, charsetPrg, charsetAsm, hex, specimen, specimenPrg,
   };

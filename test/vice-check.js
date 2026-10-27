@@ -57,19 +57,19 @@ function decodePng(buf) {
 
 const PAL = APEXSCII.PALETTE.map(h => h.toLowerCase());
 let failures = 0;
-for (const theme of Object.keys(APEXSCII.THEMES)) for (const persp of Object.keys(APEXSCII.PERSPECTIVES)) for (const mode of ['hires', 'mc']) {
+for (const theme of Object.keys(APEXSCII.THEMES)) for (const outline of [false, true]) for (const persp of Object.keys(APEXSCII.PERSPECTIVES)) for (const mode of ['hires', 'mc']) {
   const tag = (persp === 'iso' ? '' : '-' + persp) + (mode === 'mc' ? '-mc' : '');
-  const prg = path.join(repo, 'out', ...(theme === 'classic' ? [] : ['themes', theme]), `apexscii${tag}-specimen.prg`);
+  const prg = path.join(repo, 'out', ...(theme === 'classic' ? [] : ['themes', theme]), ...(outline ? ['outline'] : []), `apexscii${tag}-specimen.prg`);
 
   // What APEXSCII predicts, as palette indices, with the real ROM font in the status row.
-  const sheet = APEXSCII.specimen(persp, mode, theme);
+  const sheet = APEXSCII.specimen(persp, mode, theme, { outline });
   const rgba = APEXSCII.screenRGB(sheet.chars, sheet.screen, sheet.color, sheet.opts, rom);
   const want = Int8Array.from({ length: 64000 }, (_, i) =>
     PAL.indexOf('#' + [0, 1, 2].map(k => rgba[i * 4 + k].toString(16).padStart(2, '0')).join('')));
 
   for (const limit of cycles) {
-    const label = `${theme} ${persp} ${mode}${cycles.length > 1 ? ' @' + limit : ''}`.padEnd(34);
-    const shot = path.join(shots, `shot-${theme}${tag}-${limit}.png`);
+    const label = `${theme}${outline ? ' outlined' : ''} ${persp} ${mode}${cycles.length > 1 ? ' @' + limit : ''}`.padEnd(40);
+    const shot = path.join(shots, `shot-${theme}${outline ? '-outline' : ''}${tag}-${limit}.png`);
     spawnSync(exe, ['-default', '-warp', '-sounddev', 'dummy', '+confirmonexit', '-autostartprgmode', '1',
       ...(ntsc ? ['-ntsc'] : []), '-limitcycles', limit, '-exitscreenshot', shot, '-autostart', prg], { timeout: 120000 });
     if (!fs.existsSync(shot)) { console.log(`${label} no screenshot (did VICE start?)`); failures++; continue; }

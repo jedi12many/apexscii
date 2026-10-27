@@ -22,6 +22,11 @@ For each perspective and mode, `out/` has:
 
 `<tag>` names the perspective and mode, e.g. `-side-mc` or `-dungeon`. The isometric hi-res set has no tag (`apexscii.bin`), and isometric multicolor is `-mc`.
 
+Where the files live:
+- **Classic:** `out/`
+- **Other themes:** `out/themes/<theme>/`
+- **Outline style:** an `outline/` folder next to each of those (see *Outline style*)
+
 ## Perspectives
 
 Every set keeps PETSCII text at screen codes `$00-$3F`, then two shade sets (smooth and brick), then line art and block elements. Everything after that is free for your own glyphs.
@@ -61,6 +66,18 @@ A theme repaints the two shade sets of every perspective with its own textures. 
 | **Town** | `town-cobble`: cobbles, half-timbered plaster, ceiling beams | `town-roof`: roof shingles over brick |
 
 `buildDefault(mode, persp, theme)` takes the theme, and `THEMES` lists them. Classic files are in `out/` as before; each other theme gets the same files in `out/themes/<theme>/`. A texture is defined as 8×8 pixel art (or 4×8 fat pixels for multicolor) that repeats every 8 pixels, so adding a theme is mostly drawing a few small tiles; see `defineSet` in `apexscii.js`.
+
+## Outline style
+
+`buildDefault(mode, persp, theme, { outline: true })` gives the same set with a dark seam wherever two different faces meet, such as a top over a side or a side over the floor. It helps blocks stand apart, especially in hi-res. The seam is the first pixel row of the lower face, skipped in a cell's top row, so a renderer can apply the same rule to every pixel and still match the glyphs. The layout is unchanged, so outlined sets use no extra slots. Every theme and perspective comes in both styles. The top-down view already has its own outlines, so its outlined and plain sets are identical.
+
+## Heights in half steps
+
+In the isometric and side views a half-height step is 8 pixels, exactly one character row, so stairs, ledges and half-height blocks land on the existing slope glyphs with nothing extra. In the military and top-down views a half step is 4 pixels and needs a few composited glyphs. True ramps don't fit 2:1 isometric: a ramp rising one block per tile is seen exactly edge-on and projects to a line, and gentler slopes would need edges at every pixel row.
+
+## Animated textures
+
+`ANIMATIONS.water` is four frames of a rippling top-face texture (`water-0` to `water-3`); its sides use the smooth patterns. Animated textures aren't in any theme's layout: a renderer swaps them in frame by frame, and on the C64 the handful of glyphs they produce are rewritten each frame. That's about 10–20 glyphs, under 200 bytes, for a pool of water in an isometric map.
 
 ## Multicolor
 
