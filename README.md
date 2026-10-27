@@ -1,6 +1,6 @@
 # APEXSCII
 
-PETSCII-style character sets for the Commodore 64, one per perspective: isometric 2:1, military 45°, top-down 3/4, side oblique and first-person dungeon. Each comes in hi-res (8×8) and multicolor (4×8).
+PETSCII-style character sets for the Commodore 64, one per perspective: isometric 2:1, military 45°, top-down 3/4, side oblique, first-person dungeon and raycast. Each comes in hi-res (8×8) and multicolor (4×8).
 
 This repo is just the character sets. The editors for drawing maps, characters and tiles with them live in **apex-art**, which includes this repo as a git submodule.
 
@@ -38,6 +38,7 @@ Every set keeps PETSCII text at screen codes `$00-$3F`, then two shade sets (smo
 | Top-down 3/4 | 16×16 top (2×2), 8px front face per height unit; no slopes | 16 top-face outline variants + 4 front-face variants = 20 |
 | Side oblique | 16×16 front, top and side recede up-right at 45° | 3 faces + 1 slope × 12 pairs = 15 |
 | First-person dungeon | 160×128 view, wall boxes 80/56/40/32 wide, so every edge is 45° on char corners | 5 faces (ceiling, floor, front wall, side wall, door) + 2 slopes × 12 pairs = 29 |
+| Raycast | 80 ray columns, 4 px each; wall ends in 2 px steps | 81 wall-top + 81 wall-bottom glyphs (see *Raycast set*) |
 
 The 45° slopes go corner to corner across a cell; in multicolor they step two rows per fat pixel. Each specimen sheet lists its set's exact regions at the bottom, and `buildDefault(mode, persp)` returns them as `regions`.
 
@@ -53,6 +54,39 @@ The 45° slopes go corner to corner across a cell; in multicolor they step two r
 | `$B6-$FF` | Free |
 
 Each isometric shade set holds 51 glyphs: 3 solid faces plus 4 slope boundaries (`/` upper, `/` lower, `\` upper, `\` lower) × 12 ordered face pairs (empty/top/left/right). A 32×16 diamond is 4×2 chars and a full cube is 4×4 chars, so a height map made of cubes on the grid lands on exact glyph matches.
+
+### Raycast set
+
+This set is for Wolfenstein-style views with free movement. A raycaster draws each 4-pixel ray column as a wall slice centred on the horizon, so every screen cell holds the ends of two slices.
+
+Each ray column is in one of 9 states:
+- 0: empty
+- 1–4: wall shade A, 2/4/6/8 pixels high
+- 5–8: wall shade B, the same heights
+
+`RAY.state(shade, pixels)` converts a shade and height to a state, and `RAY.height` and `RAY.shade` go back.
+
+| Range | Contents |
+|-------|----------|
+| `$00-$3F` | Text |
+| `$40-$90` | **Ray top**: ceiling above, wall below. Screen code `$40 + 9 × left + right` |
+| `$91-$E1` | **Ray bottom**: wall above, floor below. Screen code `$91 + 9 × left + right` |
+| `$E2-$ED` | Lines and blocks |
+| `$EE-$FF` | Free |
+
+A full wall cell is either end with both states 4 (or both 8).
+
+In multicolor:
+- the ceiling is `00` (`$D021`)
+- the floor is `01` (`$D022`)
+- wall A is `10` (`$D023`)
+- wall B is `11`, the colour RAM
+
+So the colour RAM is one constant colour for the whole view, and a renderer only ever rewrites screen codes. Walls are the VIC's foreground bit pairs, so a hardware sprite with background priority disappears behind walls but stays in front of the floor and ceiling.
+
+In hi-res, wall A is solid, wall B is a checker and the floor is dotted.
+
+The set has flat shading only, so it is the same in every theme and style. The renderer that uses it is in [apex](https://github.com/jedi12many/apex).
 
 ## Themes
 
