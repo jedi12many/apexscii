@@ -140,6 +140,95 @@
   Object.assign(SETS.brick, { C: () => false, G: SETS.brick.T, W: SETS.brick.L, S: SETS.brick.R, D: x => (x & 3) !== 3 });
   Object.assign(MC_SETS.smooth, { C: () => 0, G: () => 2, W: () => 3, S: () => 1, D: fx => (fx & 1) ? 2 : 3 });
   Object.assign(MC_SETS.brick, { C: () => 0, G: MC_SETS.brick.T, W: MC_SETS.brick.L, S: MC_SETS.brick.R, D: fx => (fx & 1) ? 2 : 3 });
+
+  // ------------------------------------------------------------ theme textures
+  // A theme repaints the two shade sets of every perspective with its own textures; glyph roles and
+  // screen codes stay the same, so maps and renderers work with any theme. A texture is 8 rows of
+  // 8 pixels ('#' on) for hi-res, or 8 rows of 4 fat pixels ('0'-'3') for multicolor, tiled every
+  // 8 pixels. Faces: T top, L lit side, R shaded side; dungeon C ceiling and D door. The dungeon's
+  // floor, front wall and side wall default to T, L and R.
+  const tex = rows => (x, y) => rows[y & 7][x & 7] === '#';
+  const texMC = rows => (fx, y) => +rows[y & 7][fx & 3];
+  const shaded = f => (x, y) => f(x, y) && ((x + y) & 1) === 0; // a darker side: every other pixel
+  function defineSet(name, hi, mc) {
+    const full = (s, none, door) => Object.assign({ E: none, C: none, G: s.T, W: s.L, S: s.R, D: door }, s);
+    SETS[name] = full(hi, () => false, x => (x & 3) !== 3);
+    MC_SETS[name] = full(mc, () => 0, fx => (fx & 1) ? 2 : 3);
+  }
+  const IRON_DOOR = tex(['########', '###.###.', '###.###.', '###.###.', '###.###.', '########', '###.###.', '###.###.']);
+  const IRON_DOOR_MC = texMC(['1111', '3303', '3303', '3303', '3303', '1111', '3303', '3303']);
+  const COBWEB = tex(['#.......', '.#......', '..#.....', '...#....', '........', '........', '......#.', '........']);
+  const COBWEB_MC = texMC(['1000', '0100', '0000', '0010', '0000', '0000', '0001', '0000']);
+
+  const cryptL = tex(['#######.', '#.######', '#######.', '........', '###.####', '###.##.#', '###.####', '........']);
+  defineSet('crypt-stone', {
+    T: tex(['#######.', '#######.', '#.#####.', '........', '###.####', '###.####', '###.##.#', '........']),
+    L: cryptL, R: shaded(cryptL), C: COBWEB, D: IRON_DOOR,
+  }, {
+    T: texMC(['3330', '3330', '3130', '0000', '3033', '3033', '3031', '0000']),
+    L: texMC(['1110', '1210', '1110', '0000', '1011', '1011', '1012', '0000']),
+    R: texMC(['2220', '2020', '2220', '0000', '2022', '2022', '2020', '0000']), C: COBWEB_MC, D: IRON_DOOR_MC,
+  });
+  const mossL = tex(['#.#####.', '#.###.#.', '#####.#.', '........', '###.#.##', '###.#.##', '###.####', '........']);
+  defineSet('crypt-moss', {
+    T: tex(['#.#####.', '#######.', '###.##..', '........', '###.##.#', '#.#.####', '###.####', '........']),
+    L: mossL, R: shaded(mossL), C: COBWEB, D: IRON_DOOR,
+  }, {
+    T: texMC(['3130', '3330', '3310', '0000', '3031', '3133', '3033', '0000']),
+    L: texMC(['1210', '1210', '1110', '0000', '1021', '1021', '1011', '0000']),
+    R: texMC(['2020', '2020', '2220', '0000', '2022', '2022', '2022', '0000']), C: COBWEB_MC, D: IRON_DOOR_MC,
+  });
+
+  const CANOPY = tex(['#..#....', '.#....#.', '....#..#', '#.#.....', '.....#..', '..#....#', '#...#...', '.#....#.']);
+  const CANOPY_MC = texMC(['1020', '0102', '2010', '0201', '1020', '0102', '2010', '0201']);
+  const PLANK_DOOR = tex(['########', '###.###.', '###.###.', '###.###.', '###.###.', '###.###.', '###.###.', '########']);
+  const PLANK_DOOR_MC = texMC(['2222', '3303', '3303', '3303', '3303', '3303', '3303', '2222']);
+  const dirt = tex(['#.#.#.#.', '.#.###.#', '#.#####.', '.#.###.#', '#.#.#.#.', '.#.#.#.#', '###.#.#.', '##.#.#.#']);
+  defineSet('forest-grass', {
+    T: tex(['########', '##.#####', '#.#.####', '########', '######.#', '#####.#.', '########', '########']),
+    L: dirt, R: shaded(dirt), C: CANOPY, D: PLANK_DOOR,
+  }, {
+    T: texMC(['3333', '3233', '3333', '3332', '3333', '3323', '3333', '2333']),
+    L: texMC(['1121', '1111', '2111', '1112', '1111', '1211', '1111', '1121']),
+    R: texMC(['2202', '2222', '0222', '2220', '2222', '2022', '2222', '2202']), C: CANOPY_MC, D: PLANK_DOOR_MC,
+  });
+  const bark = tex(['#.##.###', '#.##.###', '#.###.##', '#.###.##', '##.#.###', '##.#.###', '#.##.#.#', '#.##.###']);
+  defineSet('forest-wood', {
+    T: tex(['#######.', '#######.', '........', '###.####', '###.####', '........', '#####.##', '........']),
+    L: bark, R: shaded(bark), C: CANOPY, D: PLANK_DOOR,
+  }, {
+    T: texMC(['3330', '3330', '0000', '3033', '3033', '0000', '3303', '0000']),
+    L: texMC(['3131', '3131', '3113', '3113', '1313', '1313', '3131', '3131']),
+    R: texMC(['2020', '2020', '2002', '2002', '0202', '0202', '2020', '2020']), C: CANOPY_MC, D: PLANK_DOOR_MC,
+  });
+
+  const BEAMS = tex(['########', '........', '........', '........', '########', '........', '........', '........']);
+  const BEAMS_MC = texMC(['2222', '0000', '0000', '0000', '2222', '0000', '0000', '0000']);
+  const timber = (x, y) => !((y & 7) === 0 || (x & 7) === 0 || (x & 7) === (y & 7)); // half-timbered panels
+  const timberMC = (fx, y) => ((y & 7) === 0 || (fx & 3) === 0 || (fx & 3) === (y & 7) >> 1 ? 2 : 1);
+  defineSet('town-cobble', {
+    T: tex(['###.###.', '###.###.', '###.###.', '........', '#.###.##', '#.###.##', '#.###.##', '........']),
+    L: timber, R: shaded(timber), C: BEAMS, D: PLANK_DOOR,
+  }, {
+    // Cobbles in the shared shade (MC1) with a fat-pixel accent of the material's own colour.
+    T: texMC(['3101', '1101', '1101', '0000', '0310', '0110', '0110', '0000']),
+    L: timberMC, R: (fx, y) => (timberMC(fx, y) === 2 ? 2 : ((fx + y) & 1 ? 1 : 0)), C: BEAMS_MC, D: PLANK_DOOR_MC,
+  });
+  defineSet('town-roof', {
+    T: tex(['.######.', '########', '########', '#.#.#.#.', '###..###', '########', '########', '#.#.#.#.']),
+    L: SETS.brick.L, R: SETS.brick.R, C: BEAMS, D: PLANK_DOOR,
+  }, {
+    T: texMC(['0330', '3333', '3333', '1313', '3003', '3333', '3333', '1313']),
+    L: MC_SETS.brick.L, R: MC_SETS.brick.R, C: BEAMS_MC, D: PLANK_DOOR_MC,
+  });
+
+  // Each theme names the pattern sets that fill the two shade-set regions of every perspective.
+  const THEMES = {
+    classic: { name: 'Classic', sets: ['smooth', 'brick'] },
+    crypt: { name: 'Crypt', sets: ['crypt-stone', 'crypt-moss'] },
+    forest: { name: 'Forest', sets: ['forest-grass', 'forest-wood'] },
+    town: { name: 'Town', sets: ['town-cobble', 'town-roof'] },
+  };
   const FACE_NAMES = { E: 'empty', T: 'top', L: 'left', R: 'right' };
 
   // 45° boundaries, corner to corner across a cell: military, side oblique and dungeon views.
@@ -213,8 +302,10 @@
     return !['text', 'lines', 'blocks'].includes(r.name);
   }
 
-  function buildDefault(mode = 'hires', persp = 'iso') {
-    return persp === 'iso' ? buildIso(mode) : buildPerspective(mode, persp);
+  // theme picks the textures (see THEMES); the layout and glyph roles are the same for every theme.
+  function buildDefault(mode = 'hires', persp = 'iso', theme = 'classic') {
+    const sets = THEMES[theme].sets;
+    return persp === 'iso' ? buildIso(mode, sets) : buildPerspective(mode, persp, sets);
   }
 
   const EDGE_BLOCK_GLYPHS = [
@@ -226,7 +317,7 @@
     ['quad BL', (x, y) => x < 4 && y >= 4], ['quad BR', (x, y) => x >= 4 && y >= 4],
   ];
 
-  function buildPerspective(mode, persp) {
+  function buildPerspective(mode, persp, sets) {
     const P = PERSPECTIVES[persp], mc = mode === 'mc';
     const glyphs = [], names = [], regions = [];
     for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
@@ -237,7 +328,7 @@
     region('text');
     const pairs = [];
     for (const a of P.faces) for (const b of P.faces) if (a !== b) pairs.push([a, b]);
-    for (const setName of ['smooth', 'brick']) {
+    for (const setName of sets) {
       const pat = f => (mc ? MC_SETS : SETS)[setName][P.key[f]], make = mc ? glyphFromMC : glyphFrom;
       const row = mc ? (b, fx) => b.row(fx * 2) : (b, x) => b.row(x);
       const label = (mc ? 'mc ' : '') + setName, fn = P.faceNames;
@@ -269,7 +360,7 @@
     return { glyphs, names, regions };
   }
 
-  function buildIso(mode) {
+  function buildIso(mode, sets) {
     const mc = mode === 'mc';
     const glyphs = [], names = [];
     for (let i = 0; i < 256; i++) { glyphs.push(new Uint8Array(8)); names.push('free'); }
@@ -278,7 +369,7 @@
       glyphs[i] = parseGlyph(src);
       names[i++] = 'text ' + (TEXT_NAMES[k] === ' ' ? 'space' : TEXT_NAMES[k]);
     });
-    for (const setName of ['smooth', 'brick']) {
+    for (const setName of sets) {
       const set = (mc ? MC_SETS : SETS)[setName], make = mc ? glyphFromMC : glyphFrom;
       const row = mc ? (b, fx) => b.row(fx * 2) : (b, x) => b.row(x);
       const label = (mc ? 'mc ' : '') + setName;
@@ -306,7 +397,8 @@
       names[i++] = (k < 4 ? 'line · ' : 'block · ') + n;
     });
     if (i !== 0xb6) throw new Error('layout drift: ended at ' + i.toString(16));
-    return { glyphs, names, regions: REGIONS };
+    const regions = REGIONS.map(r => ({ ...r, name: r.name === 'smooth' ? sets[0] : r.name === 'brick' ? sets[1] : r.name }));
+    return { glyphs, names, regions };
   }
 
   // --------------------------------------------------------------- palette
@@ -467,8 +559,8 @@
   // A specimen sheet shows a whole set on the C64: the 256 glyphs as a 16x16 grid with hex labels
   // (columns spaced for legibility), the layout regions underneath, and a status row in the ROM
   // font, so the raster split is exercised too. Text stays below colour 8, so it is hi-res in MC.
-  function specimen(persp = 'iso', mode = 'hires') {
-    const { glyphs, regions } = buildDefault(mode, persp), mc = mode === 'mc';
+  function specimen(persp = 'iso', mode = 'hires', theme = 'classic') {
+    const { glyphs, regions } = buildDefault(mode, persp, theme), mc = mode === 'mc';
     const ink = mc ? { title: 7, sub: 1, label: 3, legend: 1 } : { title: 7, sub: 15, label: 12, legend: 15 };
     const screen = new Uint8Array(1000).fill(0x20), color = new Uint8Array(1000).fill(1);
     const text = (row, col, s, c, rev) => {
@@ -480,7 +572,7 @@
     const centre = (row, s, c, rev) => text(row, (40 - s.length) >> 1, s, c, rev);
     const HEX = '0123456789ABCDEF';
     centre(0, 'APEXSCII ' + PERSPECTIVES[persp].name.toUpperCase().replace('°', ''), ink.title);
-    centre(1, mc ? 'MULTICOLOR 4X8' : 'HI-RES 8X8', ink.sub);
+    centre(1, (theme === 'classic' ? '' : THEMES[theme].name.toUpperCase() + '  ') + (mc ? 'MULTICOLOR 4X8' : 'HI-RES 8X8'), ink.sub);
     for (let k = 0; k < 16; k++) text(3, 7 + 2 * k, HEX[k], ink.label);
     for (let r = 0; r < 16; r++) {
       text(4 + r, 3, HEX[r] + '0', ink.label);
@@ -499,16 +591,16 @@
       const cur = lines[lines.length - 1];
       if ((cur ? cur.length + 2 : 0) + it.length > 38) lines.push(it); else lines[lines.length - 1] = cur ? cur + '  ' + it : it;
     }
-    lines.slice(0, 2).forEach((l, i) => centre(21 + i, l, ink.legend));
+    lines.slice(0, 3).forEach((l, i) => centre(21 + i, l, ink.legend)); // rows 21-23; the ROM row is 24
     const tag = ' ROM FONT ', rest = ' STATUS ROW', start = (40 - tag.length - rest.length) >> 1;
     text(24, start, tag, 7, true);
     text(24, start + tag.length, rest, 7);
     return { chars: glyphs, screen, color, opts: { mode, bg: 0, border: 0, mc1: 12, mc2: 11, romRows: 1 } };
   }
-  const specimenPrg = (persp, mode) => { const s = specimen(persp, mode); return screenPrg(s.chars, s.screen, s.color, s.opts); };
+  const specimenPrg = (persp, mode, theme) => { const s = specimen(persp, mode, theme); return screenPrg(s.chars, s.screen, s.color, s.opts); };
 
   return {
-    W, H, PALETTE, COLOR_NAMES, REGIONS, PERSPECTIVES, SETS, MC_SETS, BOUNDS, B45, PAIRS, FACE_NAMES,
+    W, H, PALETTE, COLOR_NAMES, REGIONS, PERSPECTIVES, THEMES, SETS, MC_SETS, BOUNDS, B45, PAIRS, FACE_NAMES,
     glyphFrom, glyphFromMC, buildDefault, layout, isMCSlot, asciiToScreen,
     screenRGB, screenPrg, screenAsm, flatten, charsetPrg, charsetAsm, hex, specimen, specimenPrg,
   };

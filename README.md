@@ -49,6 +49,19 @@ The 45° slopes go corner to corner across a cell; in multicolor they step two r
 
 Each isometric shade set holds 51 glyphs: 3 solid faces plus 4 slope boundaries (`/` upper, `/` lower, `\` upper, `\` lower) × 12 ordered face pairs (empty/top/left/right). A 32×16 diamond is 4×2 chars and a full cube is 4×4 chars, so a height map made of cubes on the grid lands on exact glyph matches.
 
+## Themes
+
+A theme repaints the two shade sets of every perspective with its own textures. Glyph roles and screen codes stay exactly the same in every theme, so a map made for one theme works in all of them. On the C64, switching theme is just switching to a different 2 KB character set; the screen data doesn't change.
+
+| Theme | Set 1 | Set 2 |
+|-------|-------|-------|
+| **Classic** | `smooth`: solid top, checker and dotted sides | `brick`: paving and brick |
+| **Crypt** | `crypt-stone`: flagstones, rough blocks, cobwebs, iron-banded doors | `crypt-moss`: mossy, dripping stone |
+| **Forest** | `forest-grass`: grass tufts over pebbly dirt, leaf canopy | `forest-wood`: planks and bark |
+| **Town** | `town-cobble`: cobbles, half-timbered plaster, ceiling beams | `town-roof`: roof shingles over brick |
+
+`buildDefault(mode, persp, theme)` takes the theme, and `THEMES` lists them. Classic files are in `out/` as before; each other theme gets the same files in `out/themes/<theme>/`. A texture is defined as 8×8 pixel art (or 4×8 fat pixels for multicolor) that repeats every 8 pixels, so adding a theme is mostly drawing a few small tiles; see `defineSet` in `apexscii.js`.
+
 ## Multicolor
 
 The shade sets and free slots hold 4×8 fat-pixel glyphs. Bit pairs map to:
@@ -87,7 +100,7 @@ top:    lda #$1e        ; $1E = screen $0400, APEXSCII at $3800
 
 ## Testing
 
-`test/vice-check.js` runs each specimen `.prg` from `out/` in [VICE](https://vice-emu.sourceforge.io/), saves a screenshot, and compares all 64,000 display pixels with `apexscii.js`'s own render of the same screen. The status row is predicted with VICE's copy of the C64 ROM font. VICE uses its own palette, so each expected colour must correspond to exactly one VICE colour; a wrong character, a wrong colour or a misplaced raster split shows up as differing pixels, with the first one reported by cell. It needs Node and a VICE install that has `bin/x64sc` and `C64/chargen-901225-01.bin`.
+`test/vice-check.js` runs each specimen `.prg` from `out/` and `out/themes/` in [VICE](https://vice-emu.sourceforge.io/), saves a screenshot, and compares all 64,000 display pixels with `apexscii.js`'s own render of the same screen. The status row is predicted with VICE's copy of the C64 ROM font. VICE uses its own palette, so each expected colour must correspond to exactly one VICE colour; a wrong character, a wrong colour or a misplaced raster split shows up as differing pixels, with the first one reported by cell. It needs Node and a VICE install that has `bin/x64sc` and `C64/chargen-901225-01.bin`.
 
 ```bash
 node build.js
