@@ -98,6 +98,9 @@ A theme repaints the two shade sets of every perspective with its own textures. 
 | **Crypt** | `crypt-stone`: flagstones, rough blocks, cobwebs, iron-banded doors | `crypt-moss`: mossy, dripping stone |
 | **Forest** | `forest-grass`: grass tufts over pebbly dirt, leaf canopy | `forest-wood`: planks and bark |
 | **Town** | `town-cobble`: cobbles, half-timbered plaster, ceiling beams | `town-roof`: roof shingles over brick |
+| **Brick** | `brick-stud`: toy-brick studs, a stud a cell, over smooth brick sides with a glint | `brick-tile`: flat tiles with a groove |
+
+The Brick theme's sides take the cell's colour in multicolor too, since a toy brick is one colour all over; its studs are lit on the upper left in `$D022` and shaded on the lower right in `$D023`, so set `$D022` light (white) and `$D023` dark (dark grey).
 
 `buildDefault(mode, persp, theme)` takes the theme, and `THEMES` lists them. Classic files are in `out/` as before; each other theme gets the same files in `out/themes/<theme>/`. A texture is defined as 8×8 pixel art (or 4×8 fat pixels for multicolor) that repeats every 8 pixels, so adding a theme is mostly drawing a few small tiles; see `defineSet` in `apexscii.js`.
 
